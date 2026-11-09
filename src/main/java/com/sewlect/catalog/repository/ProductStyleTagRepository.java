@@ -14,6 +14,13 @@ public interface ProductStyleTagRepository extends JpaRepository<ProductStyleTag
     @Query("SELECT DISTINCT p.product.id FROM ProductStyleTag p WHERE p.styleTag.id IN :styleTagIds")
     List<UUID> findDistinctProductIdByStyleTagIdIn(@Param("styleTagIds") Collection<UUID> styleTagIds);
 
-    @Query("SELECT DISTINCT p.styleTag.id FROM ProductStyleTag p WHERE p.product.id IN :productIds")
-    List<UUID> findDistinctStyleTagIdByProductIdIn(@Param("productIds") Collection<UUID> productIds);
+    @Query("SELECT p.product.id AS productId, p.styleTag.id AS styleTagId FROM ProductStyleTag p "
+            + "WHERE p.product.id IN :productIds")
+    List<ProductStyleTagLink> findLinksByProductIdIn(@Param("productIds") Collection<UUID> productIds);
+
+    interface ProductStyleTagLink {
+        UUID getProductId();
+
+        UUID getStyleTagId();
+    }
 }

@@ -34,7 +34,7 @@ public class ProfileController {
         return ResponseEntity.ok(profileService.getProfile(userId));
     }
 
-    @Operation(summary = "Partially update the caller's profile; omitted fields are left unchanged")
+    @Operation(summary = "Partially update the caller's profile; omitted fields are left unchanged, and sex can be set once but never changed")
     @StandardApiErrors
     @PutMapping("/profile")
     public ResponseEntity<UserProfileResponse> updateProfile(@AuthenticationPrincipal Jwt jwt,

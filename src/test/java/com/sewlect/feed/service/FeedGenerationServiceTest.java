@@ -1,5 +1,7 @@
 package com.sewlect.feed.service;
 
+import com.sewlect.common.exception.RateLimitExceededException;
+import com.sewlect.common.ratelimit.RateLimiter;
 import com.sewlect.feed.properties.FeedProperties;
 import com.sewlect.feed.dto.FeedCursor;
 import com.sewlect.feed.dto.FeedPage;
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -24,16 +27,20 @@ import org.springframework.data.domain.Limit;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -62,7 +69,10 @@ class FeedGenerationServiceTest {
     @Mock
     private AsyncTaskExecutor feedRefillExecutor;
 
-    private final FeedProperties feedProperties = new FeedProperties(20, 30, 300000);
+    @Mock
+    private RateLimiter rateLimiter;
+
+    private final FeedProperties feedProperties = new FeedProperties(20, 30, 300000, 20);
 
     private FeedGenerationService service;
 
@@ -74,7 +84,7 @@ class FeedGenerationServiceTest {
         service = new FeedGenerationService(
                 userProfileQueryService, userStylePreferenceQueryService, outfitCandidateGenerator, feedEntryRepository,
                 feedEntryPersistenceService, feedRankingService, feedCursorCodec, feedRefillGuard,
-                feedRefillExecutor, feedProperties, FIXED_CLOCK);
+                feedRefillExecutor, feedProperties, FIXED_CLOCK, rateLimiter);
 
         userId = UUID.randomUUID();
         User user = User.builder().id(userId).build();
@@ -87,14 +97,15 @@ class FeedGenerationServiceTest {
         Outfit outfit1 = outfitWithId();
         Outfit outfit2 = outfitWithId();
         when(outfitCandidateGenerator.generate(profile)).thenReturn(List.of(outfit1, outfit2));
-        when(feedEntryRepository.existsByUserIdAndOutfitId(eq(userId), any())).thenReturn(false);
-        when(feedRankingService.rankScore(any(), any(), any())).thenReturn(new BigDecimal("0.5"));
+        when(feedEntryRepository.findOutfitIdsByUserIdAndOutfitIdIn(eq(userId), any())).thenReturn(List.of());
+        when(feedRankingService.rankScores(eq(profile), eq(List.of(outfit1, outfit2)), any())).thenReturn(Map.of(
+                outfit1.getId(), new BigDecimal("0.5"), outfit2.getId(), new BigDecimal("0.7")));
         when(feedEntryPersistenceService.saveIfAbsent(any(), any(), any())).thenReturn(true);
 
         service.refillFor(userId);
 
         verify(feedEntryPersistenceService).saveIfAbsent(profile.getUser(), outfit1, new BigDecimal("0.5"));
-        verify(feedEntryPersistenceService).saveIfAbsent(profile.getUser(), outfit2, new BigDecimal("0.5"));
+        verify(feedEntryPersistenceService).saveIfAbsent(profile.getUser(), outfit2, new BigDecimal("0.7"));
     }
 
     @Test
@@ -102,14 +113,14 @@ class FeedGenerationServiceTest {
         Outfit alreadyPresent = outfitWithId();
         Outfit brandNew = outfitWithId();
         when(outfitCandidateGenerator.generate(profile)).thenReturn(List.of(alreadyPresent, brandNew));
-        when(feedEntryRepository.existsByUserIdAndOutfitId(userId, alreadyPresent.getId())).thenReturn(true);
-        when(feedEntryRepository.existsByUserIdAndOutfitId(userId, brandNew.getId())).thenReturn(false);
-        when(feedRankingService.rankScore(any(), eq(brandNew), any())).thenReturn(new BigDecimal("0.6"));
+        when(feedEntryRepository.findOutfitIdsByUserIdAndOutfitIdIn(userId,
+                List.of(alreadyPresent.getId(), brandNew.getId()))).thenReturn(List.of(alreadyPresent.getId()));
+        when(feedRankingService.rankScores(eq(profile), eq(List.of(brandNew)), any()))
+                .thenReturn(Map.of(brandNew.getId(), new BigDecimal("0.6")));
         when(feedEntryPersistenceService.saveIfAbsent(any(), any(), any())).thenReturn(true);
 
         service.refillFor(userId);
 
-        verify(feedRankingService, never()).rankScore(any(), eq(alreadyPresent), any());
         verify(feedEntryPersistenceService, never()).saveIfAbsent(any(), eq(alreadyPresent), any());
         verify(feedEntryPersistenceService).saveIfAbsent(profile.getUser(), brandNew, new BigDecimal("0.6"));
     }
@@ -119,8 +130,9 @@ class FeedGenerationServiceTest {
         Outfit raceLoser = outfitWithId();
         Outfit raceWinner = outfitWithId();
         when(outfitCandidateGenerator.generate(profile)).thenReturn(List.of(raceLoser, raceWinner));
-        when(feedEntryRepository.existsByUserIdAndOutfitId(eq(userId), any())).thenReturn(false);
-        when(feedRankingService.rankScore(any(), any(), any())).thenReturn(new BigDecimal("0.5"));
+        when(feedEntryRepository.findOutfitIdsByUserIdAndOutfitIdIn(eq(userId), any())).thenReturn(List.of());
+        when(feedRankingService.rankScores(any(), any(), any())).thenReturn(Map.of(
+                raceLoser.getId(), new BigDecimal("0.5"), raceWinner.getId(), new BigDecimal("0.5")));
         when(feedEntryPersistenceService.saveIfAbsent(any(), eq(raceLoser), any())).thenReturn(false);
         when(feedEntryPersistenceService.saveIfAbsent(any(), eq(raceWinner), any())).thenReturn(true);
 
@@ -137,7 +149,36 @@ class FeedGenerationServiceTest {
         service.refillFor(userId);
 
         verify(feedEntryPersistenceService, never()).saveIfAbsent(any(), any(), any());
-        verify(feedEntryRepository, never()).existsByUserIdAndOutfitId(any(), any());
+        verify(feedEntryRepository, never()).findOutfitIdsByUserIdAndOutfitIdIn(any(), any());
+    }
+
+    @Test
+    void refillFor_generatorReturnsTheSameOutfitTwice_ranksAndSavesItOnce() {
+        Outfit reused = outfitWithId();
+        when(outfitCandidateGenerator.generate(profile)).thenReturn(List.of(reused, reused));
+        when(feedEntryRepository.findOutfitIdsByUserIdAndOutfitIdIn(eq(userId), any())).thenReturn(List.of());
+        when(feedRankingService.rankScores(eq(profile), eq(List.of(reused)), any()))
+                .thenReturn(Map.of(reused.getId(), new BigDecimal("0.4")));
+        when(feedEntryPersistenceService.saveIfAbsent(any(), any(), any())).thenReturn(true);
+
+        service.refillFor(userId);
+
+        verify(feedEntryPersistenceService, times(1)).saveIfAbsent(profile.getUser(), reused, new BigDecimal("0.4"));
+    }
+
+    @Test
+    void refillFor_manyCandidates_checksTheExistingFeedAndRanksInOneCallEach() {
+        List<Outfit> candidates = List.of(outfitWithId(), outfitWithId(), outfitWithId(), outfitWithId());
+        when(outfitCandidateGenerator.generate(profile)).thenReturn(candidates);
+        when(feedEntryRepository.findOutfitIdsByUserIdAndOutfitIdIn(eq(userId), any())).thenReturn(List.of());
+        when(feedRankingService.rankScores(any(), any(), any())).thenReturn(Map.of());
+        when(feedEntryPersistenceService.saveIfAbsent(any(), any(), any())).thenReturn(true);
+
+        service.refillFor(userId);
+
+        verify(feedEntryRepository, times(1)).findOutfitIdsByUserIdAndOutfitIdIn(any(), any());
+        verify(feedRankingService, times(1)).rankScores(any(), any(), any());
+        verify(feedEntryPersistenceService, times(4)).saveIfAbsent(any(), any(), any());
     }
 
     @Test
@@ -333,5 +374,34 @@ class FeedGenerationServiceTest {
 
     private FeedEntry entryWithId() {
         return FeedEntry.builder().id(UUID.randomUUID()).rankScore(new BigDecimal("0.6500")).build();
+    }
+
+    @Test
+    void reset_underTheLimit_consumesTheFeedResetKeyThenDeletesTheUnseenEntries() {
+        when(rateLimiter.tryConsume(userId.toString(), "feed-reset", 20, Duration.ofHours(1))).thenReturn(true);
+
+        service.reset(userId);
+
+        InOrder order = inOrder(rateLimiter, feedEntryPersistenceService);
+        order.verify(rateLimiter).tryConsume(userId.toString(), "feed-reset", 20, Duration.ofHours(1));
+        order.verify(feedEntryPersistenceService).deleteUnseen(userId);
+    }
+
+    @Test
+    void reset_limitExhausted_throwsRateLimitExceededAndDeletesNothing() {
+        when(rateLimiter.tryConsume(userId.toString(), "feed-reset", 20, Duration.ofHours(1))).thenReturn(false);
+
+        assertThatThrownBy(() -> service.reset(userId)).isInstanceOf(RateLimitExceededException.class);
+
+        verify(feedEntryPersistenceService, never()).deleteUnseen(any());
+    }
+
+    @Test
+    void reset_neverRegeneratesTheFeedItself() {
+        when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
+
+        service.reset(userId);
+
+        verifyNoInteractions(outfitCandidateGenerator, feedRefillExecutor, feedRefillGuard);
     }
 }

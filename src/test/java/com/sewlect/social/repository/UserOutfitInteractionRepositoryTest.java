@@ -28,6 +28,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.groups.Tuple.tuple;
 
 @DataJpaTest
 @Import(JpaAuditingConfig.class)
@@ -176,5 +177,46 @@ class UserOutfitInteractionRepositoryTest extends AbstractPostgresIntegrationTes
                 .embeddingScore(new BigDecimal("0.7000"))
                 .compatibilityScore(new BigDecimal("0.8200"))
                 .build());
+    }
+
+    @Test
+    void countByOutfitIdsAndInteractionType_countsOnlyThatTypeAndOnlyTheRequestedOutfits() {
+        Outfit notRequested = persistOutfit();
+        persistInteraction(user, firstOutfit, InteractionType.LIKE);
+        persistInteraction(otherUser, firstOutfit, InteractionType.LIKE);
+        persistInteraction(user, firstOutfit, InteractionType.SAVE);
+        persistInteraction(user, secondOutfit, InteractionType.SAVE);
+        persistInteraction(user, notRequested, InteractionType.LIKE);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<UserOutfitInteractionRepository.OutfitInteractionCount> counts = userOutfitInteractionRepository
+                .countByOutfitIdsAndInteractionType(List.of(firstOutfit.getId(), secondOutfit.getId()),
+                        InteractionType.LIKE);
+
+        assertThat(counts).hasSize(1);
+        assertThat(counts.get(0).getOutfitId()).isEqualTo(firstOutfit.getId());
+        assertThat(counts.get(0).getInteractionCount()).isEqualTo(2L);
+    }
+
+    @Test
+    void findViewerInteractions_returnsOnlyThatUsersInteractionsOnTheRequestedOutfits() {
+        Outfit notRequested = persistOutfit();
+        persistInteraction(user, firstOutfit, InteractionType.LIKE);
+        persistInteraction(user, firstOutfit, InteractionType.SAVE);
+        persistInteraction(otherUser, secondOutfit, InteractionType.LIKE);
+        persistInteraction(user, notRequested, InteractionType.LIKE);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<UserOutfitInteractionRepository.ViewerInteraction> interactions = userOutfitInteractionRepository
+                .findViewerInteractions(user.getId(), List.of(firstOutfit.getId(), secondOutfit.getId()));
+
+        assertThat(interactions)
+                .extracting(UserOutfitInteractionRepository.ViewerInteraction::getOutfitId,
+                        UserOutfitInteractionRepository.ViewerInteraction::getInteractionType)
+                .containsExactlyInAnyOrder(
+                        tuple(firstOutfit.getId(), InteractionType.LIKE),
+                        tuple(firstOutfit.getId(), InteractionType.SAVE));
     }
 }

@@ -5,6 +5,7 @@ COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 RUN chmod +x mvnw && ./mvnw -B -q dependency:go-offline
 
+COPY lombok.config ./
 COPY src/ src/
 RUN ./mvnw -B -DskipTests package && cp target/*.jar application.jar
 RUN java -Djarmode=tools -jar application.jar extract --layers --destination extracted

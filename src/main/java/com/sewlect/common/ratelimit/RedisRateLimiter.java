@@ -30,16 +30,32 @@ public class RedisRateLimiter implements RateLimiter {
     }
 
     @Override
-    public boolean tryConsume(String subject, String operationKey, int limit, Duration window) {
-        String key = KEY_PREFIX + operationKey + ":" + subject;
+    public boolean tryConsume(String subject, String operationKey, int limit, Duration window, int permits) {
+        String key = keyFor(subject, operationKey);
         try {
             Long result = redisTemplate.execute(script, List.of(key),
-                    String.valueOf(limit), String.valueOf(window.toMillis()));
+                    String.valueOf(limit), String.valueOf(window.toMillis()), String.valueOf(permits));
             return result != null && result == WITHIN_LIMIT;
         } catch (RuntimeException e) {
             log.warn("Rate limit check for operation {} failed closed because Redis is unavailable: {}",
                     operationKey, e.getMessage());
             return false;
         }
+    }
+
+    @Override
+    public boolean isExhausted(String subject, String operationKey, int limit) {
+        try {
+            String count = redisTemplate.opsForValue().get(keyFor(subject, operationKey));
+            return count != null && Long.parseLong(count) >= limit;
+        } catch (RuntimeException e) {
+            log.warn("Rate limit exhaustion check for operation {} failed closed because Redis is unavailable: {}",
+                    operationKey, e.getMessage());
+            return true;
+        }
+    }
+
+    private String keyFor(String subject, String operationKey) {
+        return KEY_PREFIX + operationKey + ":" + subject;
     }
 }

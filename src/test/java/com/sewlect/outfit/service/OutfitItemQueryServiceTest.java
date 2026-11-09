@@ -7,6 +7,7 @@ import com.sewlect.outfit.entity.Outfit;
 import com.sewlect.outfit.entity.OutfitItem;
 import com.sewlect.outfit.repository.OutfitItemRepository;
 import com.sewlect.outfit.repository.OutfitRepository;
+import com.sewlect.outfit.support.OutfitShapeValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,7 +40,7 @@ class OutfitItemQueryServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new OutfitItemQueryService(outfitItemRepository, outfitRepository);
+        service = new OutfitItemQueryService(outfitItemRepository, outfitRepository, new OutfitShapeValidator());
         outfitId = UUID.randomUUID();
     }
 

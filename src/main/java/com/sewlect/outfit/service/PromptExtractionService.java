@@ -1,5 +1,6 @@
 package com.sewlect.outfit.service;
 
+import com.sewlect.common.ai.config.DeepInfraConfig;
 import com.sewlect.common.exception.ExternalServiceException;
 import com.sewlect.common.logging.enums.ExternalCallOutcome;
 import com.sewlect.common.logging.support.ExternalCallLogger;
@@ -9,59 +10,53 @@ import com.sewlect.outfit.domain.OutfitBlueprint;
 import com.sewlect.outfit.domain.PromptInferredQuery;
 import com.sewlect.outfit.domain.SlotDescription;
 import com.sewlect.outfit.domain.StructuredPromptQuery;
+import com.sewlect.outfit.enums.OutfitShapeViolation;
 import com.sewlect.outfit.support.OutfitGenderFilterResolver;
+import com.sewlect.outfit.support.OutfitShapeValidator;
 import lombok.AllArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.ollama.OllamaChatModel;
-import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
-import com.sewlect.common.ai.properties.OllamaCloudProperties;
 
 @Service
 @AllArgsConstructor
 @EnableConfigurationProperties(OutfitPromptProperties.class)
 public class PromptExtractionService {
 
-    private static final String PROVIDER = "ollama-cloud";
     private static final String OPERATION_EXTRACT = "extract-blueprints";
     private static final String OPERATION_EXTRACT_INFERRED = "extract-blueprints-inferred-filters";
     private static final String OPERATION_EXTRACT_SINGLE_SLOT = "extract-single-slot";
 
-    private final OllamaChatModel ollamaCloudChatModel;
+    private final OpenAiChatModel chatModel;
     private final OutfitPromptProperties properties;
-    private final OllamaCloudProperties ollamaCloudProperties;
     private final ExternalCallLogger externalCallLogger;
+    private final OutfitShapeValidator outfitShapeValidator;
 
     public StructuredPromptQuery extract(String rawPrompt) {
         long startedAt = System.nanoTime();
         StructuredPromptQuery query;
         try {
-            query = ChatClient.create(ollamaCloudChatModel).prompt()
-                    .options(OllamaChatOptions.builder()
-                            .model(ollamaCloudProperties.chatModel())
-                            .disableThinking())
+            query = ChatClient.create(chatModel).prompt()
                     .user(buildPrompt(rawPrompt))
                     .call()
                     .entity(StructuredPromptQuery.class);
         } catch (RuntimeException e) {
-            externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT, elapsedMs(startedAt),
+            externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
-            throw new ExternalServiceException("Ollama Cloud prompt extraction failed: " + e.getMessage());
+            throw new ExternalServiceException("DeepInfra prompt extraction failed: " + e.getMessage());
         }
 
         if (query == null || query.blueprints() == null || query.blueprints().isEmpty()) {
-            externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT, elapsedMs(startedAt),
+            externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
-            throw new ExternalServiceException("Ollama Cloud prompt extraction returned no usable blueprints");
+            throw new ExternalServiceException("DeepInfra prompt extraction returned no usable blueprints");
         }
 
-        externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT, elapsedMs(startedAt), ExternalCallOutcome.SUCCESS);
+        externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT, ExternalCallLogger.elapsedMillisSince(startedAt), ExternalCallOutcome.SUCCESS);
 
         for (OutfitBlueprint blueprint : query.blueprints()) {
             validateShape(blueprint);
@@ -74,26 +69,23 @@ public class PromptExtractionService {
         long startedAt = System.nanoTime();
         PromptInferredQuery query;
         try {
-            query = ChatClient.create(ollamaCloudChatModel).prompt()
-                    .options(OllamaChatOptions.builder()
-                            .model(ollamaCloudProperties.chatModel())
-                            .disableThinking())
+            query = ChatClient.create(chatModel).prompt()
                     .user(buildInferredFiltersPrompt(rawPrompt))
                     .call()
                     .entity(PromptInferredQuery.class);
         } catch (RuntimeException e) {
-            externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT_INFERRED, elapsedMs(startedAt),
+            externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT_INFERRED, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
-            throw new ExternalServiceException("Ollama Cloud prompt extraction failed: " + e.getMessage());
+            throw new ExternalServiceException("DeepInfra prompt extraction failed: " + e.getMessage());
         }
 
         if (query == null || query.blueprints() == null || query.blueprints().isEmpty()) {
-            externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT_INFERRED, elapsedMs(startedAt),
+            externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT_INFERRED, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
-            throw new ExternalServiceException("Ollama Cloud prompt extraction returned no usable blueprints");
+            throw new ExternalServiceException("DeepInfra prompt extraction returned no usable blueprints");
         }
 
-        externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT_INFERRED, elapsedMs(startedAt),
+        externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT_INFERRED, ExternalCallLogger.elapsedMillisSince(startedAt),
                 ExternalCallOutcome.SUCCESS);
 
         for (OutfitBlueprint blueprint : query.blueprints()) {
@@ -109,67 +101,51 @@ public class PromptExtractionService {
         long startedAt = System.nanoTime();
         SlotDescription result;
         try {
-            result = ChatClient.create(ollamaCloudChatModel).prompt()
-                    .options(OllamaChatOptions.builder()
-                            .model(ollamaCloudProperties.chatModel())
-                            .disableThinking())
+            result = ChatClient.create(chatModel).prompt()
                     .user(buildSingleSlotPrompt(rawPrompt, role))
                     .call()
                     .entity(SlotDescription.class);
         } catch (RuntimeException e) {
-            externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT_SINGLE_SLOT, elapsedMs(startedAt),
+            externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT_SINGLE_SLOT, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
-            throw new ExternalServiceException("Ollama Cloud single-slot prompt extraction failed: " + e.getMessage());
+            throw new ExternalServiceException("DeepInfra single-slot prompt extraction failed: " + e.getMessage());
         }
 
         if (result == null || result.description() == null || result.description().isBlank()) {
-            externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT_SINGLE_SLOT, elapsedMs(startedAt),
+            externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT_SINGLE_SLOT, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
-            throw new ExternalServiceException("Ollama Cloud single-slot prompt extraction returned no usable description");
+            throw new ExternalServiceException("DeepInfra single-slot prompt extraction returned no usable description");
         }
 
-        externalCallLogger.logCall(PROVIDER, OPERATION_EXTRACT_SINGLE_SLOT, elapsedMs(startedAt),
+        externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EXTRACT_SINGLE_SLOT, ExternalCallLogger.elapsedMillisSince(startedAt),
                 ExternalCallOutcome.SUCCESS);
 
         return result.description();
     }
 
-    private long elapsedMs(long startedAtNanos) {
-        return (System.nanoTime() - startedAtNanos) / 1_000_000L;
-    }
-
     private void validateShape(OutfitBlueprint blueprint) {
         List<GarmentRole> roles = blueprint.slots().stream().map(SlotDescription::role).toList();
-        Set<GarmentRole> roleSet = new HashSet<>(roles);
+        outfitShapeValidator.findViolation(roles).ifPresent(violation -> {
+            throw new ExternalServiceException(shapeViolationMessage(violation, roles));
+        });
+    }
 
-        if (roleSet.size() != roles.size()) {
-            throw new ExternalServiceException(
-                    "Structured prompt extraction returned a blueprint with duplicate slot roles: " + roles);
-        }
-
-        boolean hasTop = roleSet.contains(GarmentRole.TOP);
-        boolean hasBottom = roleSet.contains(GarmentRole.BOTTOM);
-        boolean hasFullBody = roleSet.contains(GarmentRole.FULL_BODY);
-        boolean validCore = (hasTop && hasBottom && !hasFullBody) || (hasFullBody && !hasTop && !hasBottom);
-
-        if (!validCore) {
-            throw new ExternalServiceException(
-                    "Structured prompt extraction returned a blueprint violating the top+bottom/full_body shape rule: " + roles);
-        }
-
-        if (!roleSet.contains(GarmentRole.FOOTWEAR)) {
-            throw new ExternalServiceException(
-                    "Structured prompt extraction returned a blueprint missing footwear: " + roles);
-        }
+    private String shapeViolationMessage(OutfitShapeViolation violation, List<GarmentRole> roles) {
+        return switch (violation) {
+            case DUPLICATE_ROLE -> "Structured prompt extraction returned a blueprint with duplicate slot roles: " + roles;
+            case INVALID_CORE ->
+                    "Structured prompt extraction returned a blueprint violating the top+bottom/full_body shape rule: " + roles;
+            case MISSING_FOOTWEAR -> "Structured prompt extraction returned a blueprint missing footwear: " + roles;
+        };
     }
 
     private void validateGenders(Set<String> genders) {
         if (genders == null || genders.isEmpty()) {
-            throw new ExternalServiceException("Ollama Cloud prompt extraction returned no inferred genders");
+            throw new ExternalServiceException("DeepInfra prompt extraction returned no inferred genders");
         }
         if (!OutfitGenderFilterResolver.ALL_GENDERS.containsAll(genders)) {
             throw new ExternalServiceException(
-                    "Ollama Cloud prompt extraction returned an invalid gender category: " + genders);
+                    "DeepInfra prompt extraction returned an invalid gender category: " + genders);
         }
     }
 

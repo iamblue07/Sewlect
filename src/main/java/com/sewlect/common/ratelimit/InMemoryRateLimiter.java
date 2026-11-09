@@ -25,7 +25,7 @@ public class InMemoryRateLimiter implements RateLimiter {
     }
 
     @Override
-    public boolean tryConsume(String subject, String operationKey, int limit, Duration window) {
+    public boolean tryConsume(String subject, String operationKey, int limit, Duration window, int permits) {
         RateLimitKey key = new RateLimitKey(subject, operationKey);
         Instant now = clock.instant();
         AtomicBoolean consumed = new AtomicBoolean(false);
@@ -35,15 +35,21 @@ public class InMemoryRateLimiter implements RateLimiter {
                     ? new WindowState(now, window, 0)
                     : existing;
 
-            if (current.count() >= limit) {
+            if (current.count() + permits > limit) {
                 return current;
             }
 
             consumed.set(true);
-            return current.increment();
+            return current.increment(permits);
         });
 
         return consumed.get();
+    }
+
+    @Override
+    public boolean isExhausted(String subject, String operationKey, int limit) {
+        WindowState current = windows.get(new RateLimitKey(subject, operationKey));
+        return current != null && !current.isExpired(clock.instant()) && current.count() >= limit;
     }
 
     @Scheduled(fixedRateString = "${common.ratelimit.sweep-interval-ms}")
@@ -66,8 +72,8 @@ public class InMemoryRateLimiter implements RateLimiter {
             return now.isAfter(windowStart.plus(window));
         }
 
-        WindowState increment() {
-            return new WindowState(windowStart, window, count + 1);
+        WindowState increment(int permits) {
+            return new WindowState(windowStart, window, count + permits);
         }
     }
 }

@@ -1,16 +1,16 @@
 package com.sewlect.outfit.support;
 
-import com.sewlect.common.taxonomy.enums.GarmentRole;
-import com.sewlect.outfit.domain.OutfitItemView;
+import com.sewlect.outfit.domain.CompatibilityScoreBreakdown;
+import com.sewlect.outfit.domain.OutfitEngagement;
+import com.sewlect.outfit.domain.OutfitView;
 import com.sewlect.outfit.dto.OutfitResponse;
 import com.sewlect.outfit.entity.Outfit;
-import com.sewlect.outfit.service.OutfitItemQueryService;
+import com.sewlect.outfit.service.OutfitEngagementReader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import com.sewlect.outfit.support.OutfitViewCache;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -20,145 +20,119 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class OutfitResponseAssemblerTest {
 
     @Mock
-    private OutfitItemQueryService outfitItemQueryService;
+    private OutfitViewAssembler outfitViewAssembler;
 
     @Mock
-    private OutfitViewCache outfitViewCache;
+    private OutfitEngagementReader outfitEngagementReader;
 
     private OutfitResponseAssembler assembler;
 
+    private final UUID viewerId = UUID.randomUUID();
+
     @BeforeEach
     void setUp() {
-        assembler = new OutfitResponseAssembler(outfitItemQueryService, outfitViewCache);
+        assembler = new OutfitResponseAssembler(outfitViewAssembler, outfitEngagementReader);
     }
 
     @Test
-    void toResponse_buildsBreakdownFromPersistedScoreColumns() {
-        Outfit outfit = Outfit.builder()
-                .id(UUID.randomUUID())
-                .colorScore(new BigDecimal("0.9100"))
-                .layeringScore(new BigDecimal("0.8200"))
-                .structuredScore(new BigDecimal("0.8650"))
-                .embeddingScore(new BigDecimal("0.7300"))
-                .compatibilityScore(new BigDecimal("0.7975"))
-                .build();
-        when(outfitItemQueryService.sumBasePrice(outfit.getId())).thenReturn(BigDecimal.ZERO);
-        when(outfitItemQueryService.findItemViews(outfit.getId())).thenReturn(List.of());
+    void toResponse_mergesTheViewWithTheViewersEngagement() {
+        Outfit outfit = outfit();
+        OutfitView view = view(outfit.getId(), "84.50");
+        OutfitEngagement engagement = new OutfitEngagement(6L, true, false);
+        when(outfitViewAssembler.toView(outfit)).thenReturn(view);
+        when(outfitEngagementReader.read(List.of(outfit.getId()), viewerId))
+                .thenReturn(Map.of(outfit.getId(), engagement));
 
-        OutfitResponse response = assembler.toResponse(outfit);
-
-        assertThat(response.compatibilityBreakdown().colorScore()).isEqualByComparingTo("0.9100");
-        assertThat(response.compatibilityBreakdown().layeringScore()).isEqualByComparingTo("0.8200");
-        assertThat(response.compatibilityBreakdown().structuredScore()).isEqualByComparingTo("0.8650");
-        assertThat(response.compatibilityBreakdown().embeddingScore()).isEqualByComparingTo("0.7300");
-        assertThat(response.compatibilityBreakdown().finalScore()).isEqualByComparingTo("0.7975");
-    }
-
-    @Test
-    void toResponse_totalPriceAndItemsComeFromSingleOutfitLookups() {
-        Outfit outfit = Outfit.builder().id(UUID.randomUUID()).build();
-        List<OutfitItemView> items = List.of(itemView(), itemView());
-        when(outfitItemQueryService.sumBasePrice(outfit.getId())).thenReturn(new BigDecimal("84.50"));
-        when(outfitItemQueryService.findItemViews(outfit.getId())).thenReturn(items);
-
-        OutfitResponse response = assembler.toResponse(outfit);
+        OutfitResponse response = assembler.toResponse(outfit, viewerId);
 
         assertThat(response.outfitId()).isEqualTo(outfit.getId());
+        assertThat(response.compatibilityBreakdown()).isEqualTo(view.compatibilityBreakdown());
         assertThat(response.totalPrice()).isEqualByComparingTo("84.50");
-        assertThat(response.items()).isEqualTo(items);
-
-        verify(outfitItemQueryService).sumBasePrice(outfit.getId());
-        verify(outfitItemQueryService).findItemViews(outfit.getId());
-        verify(outfitItemQueryService, never()).sumBasePriceForOutfits(anyList());
-        verify(outfitItemQueryService, never()).findItemViewsForOutfits(anyList());
+        assertThat(response.items()).isEqualTo(view.items());
+        assertThat(response.engagement()).isEqualTo(engagement);
     }
 
     @Test
-    void toResponses_emptyList_returnsEmptyListWithoutCallingBatchedLookups() {
-        List<OutfitResponse> responses = assembler.toResponses(List.of());
+    void toResponse_outfitMissingFromTheEngagementResult_getsNone() {
+        Outfit outfit = outfit();
+        when(outfitViewAssembler.toView(outfit)).thenReturn(view(outfit.getId(), "10.00"));
+        when(outfitEngagementReader.read(List.of(outfit.getId()), viewerId)).thenReturn(Map.of());
 
-        assertThat(responses).isEmpty();
-        verify(outfitItemQueryService, never()).findItemViewsForOutfits(anyList());
-        verify(outfitItemQueryService, never()).sumBasePriceForOutfits(anyList());
+        assertThat(assembler.toResponse(outfit, viewerId).engagement()).isEqualTo(OutfitEngagement.none());
     }
 
     @Test
-    void toResponses_multipleOutfits_usesOneBatchedItemQueryAndOnePriceQueryNotPerOutfit() {
-        Outfit first = Outfit.builder().id(UUID.randomUUID()).build();
-        Outfit second = Outfit.builder().id(UUID.randomUUID()).build();
-        Outfit third = Outfit.builder().id(UUID.randomUUID()).build();
-        List<UUID> outfitIds = List.of(first.getId(), second.getId(), third.getId());
-
-        when(outfitItemQueryService.findItemViewsForOutfits(outfitIds)).thenReturn(Map.of(
-                first.getId(), List.of(itemView()),
-                second.getId(), List.of(itemView()),
-                third.getId(), List.of(itemView())));
-        when(outfitItemQueryService.sumBasePriceForOutfits(outfitIds)).thenReturn(Map.of(
-                first.getId(), new BigDecimal("10.00"),
-                second.getId(), new BigDecimal("20.00"),
-                third.getId(), new BigDecimal("30.00")));
-
-        List<OutfitResponse> responses = assembler.toResponses(List.of(first, second, third));
-
-        assertThat(responses).hasSize(3);
-        verify(outfitItemQueryService, times(1)).findItemViewsForOutfits(anyList());
-        verify(outfitItemQueryService, times(1)).sumBasePriceForOutfits(anyList());
-        verify(outfitItemQueryService, never()).findItemViews(any());
-        verify(outfitItemQueryService, never()).sumBasePrice(any());
+    void toResponses_emptyList_returnsEmptyWithoutTouchingViewsOrEngagement() {
+        assertThat(assembler.toResponses(List.of(), viewerId)).isEmpty();
+        verifyNoInteractions(outfitViewAssembler, outfitEngagementReader);
     }
 
     @Test
-    void toResponses_preservesInputOrder() {
-        Outfit first = Outfit.builder().id(UUID.randomUUID()).build();
-        Outfit second = Outfit.builder().id(UUID.randomUUID()).build();
-        Outfit third = Outfit.builder().id(UUID.randomUUID()).build();
-        List<UUID> outfitIds = List.of(first.getId(), second.getId(), third.getId());
+    void toResponses_preservesInputOrderAndMergesEachOutfitsOwnEngagement() {
+        Outfit first = outfit();
+        Outfit second = outfit();
+        Outfit third = outfit();
+        List<Outfit> outfits = List.of(first, second, third);
+        when(outfitViewAssembler.toViews(outfits)).thenReturn(List.of(
+                view(first.getId(), "10.00"), view(second.getId(), "20.00"), view(third.getId(), "30.00")));
+        when(outfitEngagementReader.read(List.of(first.getId(), second.getId(), third.getId()), viewerId))
+                .thenReturn(Map.of(
+                        third.getId(), new OutfitEngagement(3L, false, true),
+                        first.getId(), new OutfitEngagement(1L, true, false)));
 
-        when(outfitItemQueryService.findItemViewsForOutfits(outfitIds)).thenReturn(Map.of(
-                first.getId(), List.of(),
-                second.getId(), List.of(),
-                third.getId(), List.of()));
-        when(outfitItemQueryService.sumBasePriceForOutfits(outfitIds)).thenReturn(Map.of(
-                first.getId(), new BigDecimal("10.00"),
-                second.getId(), new BigDecimal("20.00"),
-                third.getId(), new BigDecimal("30.00")));
-
-        List<OutfitResponse> responses = assembler.toResponses(List.of(first, second, third));
+        List<OutfitResponse> responses = assembler.toResponses(outfits, viewerId);
 
         assertThat(responses).extracting(OutfitResponse::outfitId)
                 .containsExactly(first.getId(), second.getId(), third.getId());
         assertThat(responses).extracting(OutfitResponse::totalPrice)
+                .usingElementComparator(BigDecimal::compareTo)
                 .containsExactly(new BigDecimal("10.00"), new BigDecimal("20.00"), new BigDecimal("30.00"));
+        assertThat(responses).extracting(OutfitResponse::engagement).containsExactly(
+                new OutfitEngagement(1L, true, false), OutfitEngagement.none(), new OutfitEngagement(3L, false, true));
     }
 
     @Test
-    void toResponses_outfitWithNoItems_stillProducesAResponseNotAnException() {
-        Outfit outfit = Outfit.builder().id(UUID.randomUUID()).build();
-        List<UUID> outfitIds = List.of(outfit.getId());
+    void toResponses_wholePage_callsTheViewAssemblerOnceAndTheEngagementReaderOnce() {
+        List<Outfit> outfits = List.of(outfit(), outfit(), outfit(), outfit(), outfit());
+        when(outfitViewAssembler.toViews(outfits)).thenReturn(
+                outfits.stream().map(outfit -> view(outfit.getId(), "10.00")).toList());
+        when(outfitEngagementReader.read(anyList(), any())).thenReturn(Map.of());
 
-        when(outfitItemQueryService.findItemViewsForOutfits(outfitIds))
-                .thenReturn(Map.of(outfit.getId(), List.of()));
-        when(outfitItemQueryService.sumBasePriceForOutfits(outfitIds))
-                .thenReturn(Map.of(outfit.getId(), BigDecimal.ZERO));
+        assembler.toResponses(outfits, viewerId);
 
-        List<OutfitResponse> responses = assembler.toResponses(List.of(outfit));
-
-        assertThat(responses).hasSize(1);
-        assertThat(responses.get(0).items()).isEmpty();
-        assertThat(responses.get(0).totalPrice()).isEqualByComparingTo("0");
+        verify(outfitViewAssembler, times(1)).toViews(anyList());
+        verify(outfitViewAssembler, times(0)).toView(any());
+        verify(outfitEngagementReader, times(1)).read(anyList(), any());
+        verify(outfitEngagementReader, times(0)).readLikeCounts(any());
     }
 
-    private OutfitItemView itemView() {
-        return new OutfitItemView(UUID.randomUUID(), UUID.randomUUID(), "Product",
-                "https://example.com/p.jpg", new BigDecimal("10.00"), GarmentRole.TOP);
+    @Test
+    void toResponses_passesTheViewerThroughToTheEngagementReader() {
+        Outfit outfit = outfit();
+        when(outfitViewAssembler.toViews(List.of(outfit))).thenReturn(List.of(view(outfit.getId(), "10.00")));
+        when(outfitEngagementReader.read(List.of(outfit.getId()), viewerId)).thenReturn(Map.of());
+
+        assembler.toResponses(List.of(outfit), viewerId);
+
+        verify(outfitEngagementReader).read(List.of(outfit.getId()), viewerId);
+    }
+
+    private Outfit outfit() {
+        return Outfit.builder().id(UUID.randomUUID()).build();
+    }
+
+    private OutfitView view(UUID outfitId, String totalPrice) {
+        BigDecimal score = new BigDecimal("0.8");
+        return new OutfitView(outfitId, new CompatibilityScoreBreakdown(score, score, score, score, score),
+                new BigDecimal(totalPrice), List.of());
     }
 }

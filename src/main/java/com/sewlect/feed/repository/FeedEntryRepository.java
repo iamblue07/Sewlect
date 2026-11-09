@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -37,7 +38,13 @@ public interface FeedEntryRepository extends JpaRepository<FeedEntry, UUID> {
             @Param("cursorId") UUID cursorId,
             Limit limit);
 
-    boolean existsByUserIdAndOutfitId(UUID userId, UUID outfitId);
+    @Query("SELECT f.outfit.id FROM FeedEntry f WHERE f.user.id = :userId AND f.outfit.id IN :outfitIds")
+    List<UUID> findOutfitIdsByUserIdAndOutfitIdIn(@Param("userId") UUID userId,
+                                                  @Param("outfitIds") Collection<UUID> outfitIds);
+
+    @Modifying(clearAutomatically = true)
+    @Query("DELETE FROM FeedEntry f WHERE f.user.id = :userId AND f.shownAt IS NULL")
+    int deleteByUserIdAndShownAtIsNull(@Param("userId") UUID userId);
 
     @Modifying(clearAutomatically = true)
     @Query("UPDATE FeedEntry f SET f.shownAt = :shownAt WHERE f.id IN :ids")

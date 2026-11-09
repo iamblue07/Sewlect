@@ -9,22 +9,21 @@ import com.sewlect.outfit.properties.OutfitDiversityProperties;
 import com.sewlect.outfit.properties.OutfitPromptProperties;
 import com.sewlect.outfit.domain.CompatibilityScoreBreakdown;
 import com.sewlect.outfit.domain.OutfitBlueprint;
-import com.sewlect.outfit.domain.OutfitItemView;
 import com.sewlect.outfit.dto.OutfitResponse;
 import com.sewlect.outfit.domain.PromptInferredQuery;
+import com.sewlect.outfit.domain.PromptQueryOutcome;
 import com.sewlect.outfit.domain.SlotDescription;
 import com.sewlect.outfit.domain.StructuredPromptQuery;
+import com.sewlect.outfit.entity.AiPromptQuery;
 import com.sewlect.outfit.entity.Outfit;
+import com.sewlect.outfit.enums.AiPromptQueryStatus;
 import com.sewlect.outfit.enums.OutfitSource;
 import com.sewlect.outfit.support.BudgetCeilingResolver;
 import com.sewlect.outfit.support.OutfitGenderFilterResolver;
 import com.sewlect.outfit.support.OutfitItemSetHasher;
+import com.sewlect.outfit.support.OutfitResponseAssembler;
 import lombok.AllArgsConstructor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.Limit;
-import org.springframework.data.domain.SearchResult;
-import org.springframework.data.domain.SearchResults;
 import org.springframework.data.domain.Vector;
 import org.springframework.stereotype.Service;
 
@@ -37,7 +36,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 
 @Service
 @AllArgsConstructor
@@ -50,8 +48,8 @@ public class PromptOutfitGenerationService {
     private final OutfitCompatibilityScorer outfitCompatibilityScorer;
     private final OutfitGenderFilterResolver outfitGenderFilterResolver;
     private final OutfitItemSetHasher outfitItemSetHasher;
-    private final OutfitPersistenceService outfitPersistenceService;
-    private final OutfitItemQueryService outfitItemQueryService;
+    private final OutfitBatchPersistenceService outfitBatchPersistenceService;
+    private final OutfitResponseAssembler outfitResponseAssembler;
     private final UserProfileQueryService userProfileQueryService;
     private final AiPromptQueryService aiPromptQueryService;
     private final BudgetCeilingResolver budgetCeilingResolver;
@@ -59,37 +57,59 @@ public class PromptOutfitGenerationService {
     private final OutfitDiversityProperties diversityProperties;
 
     public List<OutfitResponse> generate(UUID userId, String rawPrompt, boolean matchProfile) {
-        if (matchProfile) {
-            StructuredPromptQuery query = extractOrLogFailure(userId, rawPrompt, promptExtractionService::extract);
+        PromptQueryOutcome outcome = execute(userId, rawPrompt, matchProfile);
+        if (outcome.status() == AiPromptQueryStatus.FAILED) {
+            throw new ExternalServiceException(outcome.errorMessage());
+        }
+        return outfitResponseAssembler.toResponses(outcome.outfits(), userId);
+    }
 
-            UserProfile profile = userProfileQueryService.getById(userId);
-            Set<String> genders = outfitGenderFilterResolver.allowedGenders(profile.getSex());
-            BigDecimal priceCeiling = budgetCeilingResolver.resolve(profile.getAverageBudgetPerOutfit());
+    public PromptQueryOutcome execute(UUID userId, String rawPrompt, boolean matchProfile) {
+        try {
+            return matchProfile
+                    ? executeAgainstProfile(userId, rawPrompt)
+                    : executeWithInferredFilters(userId, rawPrompt);
+        } catch (RuntimeException e) {
+            AiPromptQuery failure = logFailurePreservingCause(userId, rawPrompt, e);
+            return new PromptQueryOutcome(failure.getId(), AiPromptQueryStatus.FAILED, e.getMessage(), List.of());
+        }
+    }
 
-            return buildResponses(userId, rawPrompt, query.blueprints(), genders, priceCeiling, query, matchProfile);
+    private AiPromptQuery logFailurePreservingCause(UUID userId, String rawPrompt, RuntimeException cause) {
+        try {
+            return aiPromptQueryService.logFailure(userId, rawPrompt, cause.getMessage());
+        } catch (RuntimeException loggingFailure) {
+            loggingFailure.addSuppressed(cause);
+            throw loggingFailure;
+        }
+    }
+
+    private PromptQueryOutcome executeAgainstProfile(UUID userId, String rawPrompt) {
+        UserProfile profile = userProfileQueryService.getById(userId);
+        BigDecimal priceCeiling = budgetCeilingResolver.resolve(profile.getAverageBudgetPerOutfit());
+
+        if (profile.getSex() == null) {
+            PromptInferredQuery query = promptExtractionService.extractWithInferredFilters(rawPrompt);
+            return buildOutcome(userId, rawPrompt, query.blueprints(), query.genders(), priceCeiling, query, true);
         }
 
-        PromptInferredQuery query = extractOrLogFailure(
-                userId, rawPrompt, promptExtractionService::extractWithInferredFilters);
+        StructuredPromptQuery query = promptExtractionService.extract(rawPrompt);
+        Set<String> genders = outfitGenderFilterResolver.allowedGenders(profile.getSex());
+        return buildOutcome(userId, rawPrompt, query.blueprints(), genders, priceCeiling, query, true);
+    }
+
+    private PromptQueryOutcome executeWithInferredFilters(UUID userId, String rawPrompt) {
+        PromptInferredQuery query = promptExtractionService.extractWithInferredFilters(rawPrompt);
 
         Set<String> genders = query.genders();
         BigDecimal priceCeiling = budgetCeilingResolver.resolve(query.budget());
 
-        return buildResponses(userId, rawPrompt, query.blueprints(), genders, priceCeiling, query, matchProfile);
+        return buildOutcome(userId, rawPrompt, query.blueprints(), genders, priceCeiling, query, false);
     }
 
-    private <T> T extractOrLogFailure(UUID userId, String rawPrompt, Function<String, T> extractor) {
-        try {
-            return extractor.apply(rawPrompt);
-        } catch (RuntimeException e) {
-            aiPromptQueryService.logFailure(userId, rawPrompt, e.getMessage());
-            throw e;
-        }
-    }
-
-    private List<OutfitResponse> buildResponses(UUID userId, String rawPrompt, List<OutfitBlueprint> blueprints,
-                                                Set<String> genders, BigDecimal priceCeiling, Object loggedQuery,
-                                                boolean matchProfile) {
+    private PromptQueryOutcome buildOutcome(UUID userId, String rawPrompt, List<OutfitBlueprint> blueprints,
+                                            Set<String> genders, BigDecimal priceCeiling, Object loggedQuery,
+                                            boolean matchProfile) {
         List<BlueprintResult> pool = new ArrayList<>();
         for (OutfitBlueprint blueprint : blueprints) {
             if (pool.size() >= properties.generationPoolSize()) {
@@ -99,9 +119,7 @@ public class PromptOutfitGenerationService {
         }
 
         if (pool.isEmpty()) {
-            String errorMessage = "No viable product combination was found for any extracted blueprint";
-            aiPromptQueryService.logFailure(userId, rawPrompt, errorMessage);
-            throw new ExternalServiceException(errorMessage);
+            throw new ExternalServiceException("No viable product combination was found for any extracted blueprint");
         }
 
         List<BlueprintResult> sortedPool = pool.stream()
@@ -114,33 +132,12 @@ public class PromptOutfitGenerationService {
                 .map(winner -> new OutfitPersistenceService.PersistenceCandidate(
                         winner.products(), winner.breakdown(), winner.itemSetHash(), OutfitSource.AI_PROMPT))
                 .toList();
-        List<Outfit> outfits = persistCandidatesWithSingleRetry(candidates);
+        List<Outfit> outfits = outfitBatchPersistenceService.persistWithSingleRetry(candidates);
 
         List<UUID> outfitIds = outfits.stream().map(Outfit::getId).toList();
-        Map<UUID, List<OutfitItemView>> itemViewsByOutfitId = outfitItemQueryService.findItemViewsForOutfits(outfitIds);
-        Map<UUID, BigDecimal> totalPriceByOutfitId = outfitItemQueryService.sumBasePriceForOutfits(outfitIds);
+        AiPromptQuery success = aiPromptQueryService.logSuccess(userId, rawPrompt, loggedQuery, matchProfile, outfitIds);
 
-        List<OutfitResponse> responses = new ArrayList<>();
-        for (int i = 0; i < winners.size(); i++) {
-            Outfit outfit = outfits.get(i);
-            WinningOutfit winner = winners.get(i);
-            responses.add(new OutfitResponse(outfit.getId(), winner.breakdown(),
-                    totalPriceByOutfitId.get(outfit.getId()), itemViewsByOutfitId.get(outfit.getId())));
-        }
-
-        aiPromptQueryService.logSuccess(userId, rawPrompt, loggedQuery, matchProfile,
-                responses.stream().map(OutfitResponse::outfitId).toList());
-
-        return responses;
-    }
-
-    private List<Outfit> persistCandidatesWithSingleRetry(
-            List<OutfitPersistenceService.PersistenceCandidate> candidates) {
-        try {
-            return outfitPersistenceService.saveOrReuseBatch(candidates);
-        } catch (DataIntegrityViolationException e) {
-            return outfitPersistenceService.saveOrReuseBatch(candidates);
-        }
+        return new PromptQueryOutcome(success.getId(), AiPromptQueryStatus.SUCCESS, null, outfits);
     }
 
     private List<WinningOutfit> selectTopUniqueCombinations(List<BlueprintResult> sortedPool) {
@@ -204,10 +201,8 @@ public class PromptOutfitGenerationService {
 
     private List<Product> fetchSlotCandidates(SlotDescription slot, Set<String> genders, BigDecimal priceCeiling) {
         Vector referenceEmbedding = promptQueryEmbeddingService.embed(slot.description());
-        SearchResults<Product> results = productSearchService.findNearest(
-                slot.role(), genders, priceCeiling, referenceEmbedding,
-                ProductSearchService.UNBOUNDED_COSINE_DISTANCE, Limit.of(properties.topKPerSlot()));
-        return results.getContent().stream().map(SearchResult::getContent).toList();
+        return productSearchService.findNearest(
+                slot.role(), genders, priceCeiling, referenceEmbedding, properties.topKPerSlot());
     }
 
     private List<List<Product>> cartesianProduct(List<List<Product>> candidatesBySlot) {

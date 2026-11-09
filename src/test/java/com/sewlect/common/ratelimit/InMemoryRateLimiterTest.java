@@ -119,4 +119,73 @@ class InMemoryRateLimiterTest {
             return instant;
         }
     }
+
+    @Test
+    void tryConsume_permits_aRequestLargerThanTheRemainingBudgetConsumesNothing() {
+        String subject = UUID.randomUUID().toString();
+        Duration hour = Duration.ofHours(1);
+
+        assertThat(rateLimiter.tryConsume(subject, "generation", 2, hour, 3)).isFalse();
+        assertThat(rateLimiter.tryConsume(subject, "generation", 2, hour, 2)).isTrue();
+        assertThat(rateLimiter.tryConsume(subject, "generation", 2, hour, 1)).isFalse();
+    }
+
+    @Test
+    void tryConsume_permits_partialBudgetAdmitsOnlyRequestsThatFit() {
+        String subject = UUID.randomUUID().toString();
+        Duration hour = Duration.ofHours(1);
+
+        assertThat(rateLimiter.tryConsume(subject, "generation", 5, hour, 4)).isTrue();
+        assertThat(rateLimiter.tryConsume(subject, "generation", 5, hour, 2)).isFalse();
+        assertThat(rateLimiter.tryConsume(subject, "generation", 5, hour, 1)).isTrue();
+        assertThat(rateLimiter.tryConsume(subject, "generation", 5, hour)).isFalse();
+    }
+
+    @Test
+    void isExhausted_noWindowYet_isFalse() {
+        assertThat(rateLimiter.isExhausted(UUID.randomUUID().toString(), "stylist-pause", 1)).isFalse();
+    }
+
+    @Test
+    void isExhausted_belowTheLimit_isFalseAndAtTheLimit_isTrue() {
+        String subject = UUID.randomUUID().toString();
+
+        rateLimiter.tryConsume(subject, "stylist-strike", 3, Duration.ofHours(24));
+        assertThat(rateLimiter.isExhausted(subject, "stylist-strike", 2)).isFalse();
+
+        rateLimiter.tryConsume(subject, "stylist-strike", 3, Duration.ofHours(24));
+        assertThat(rateLimiter.isExhausted(subject, "stylist-strike", 2)).isTrue();
+    }
+
+    @Test
+    void isExhausted_afterTheWindowExpires_isFalseAgain() {
+        String subject = UUID.randomUUID().toString();
+        rateLimiter.tryConsume(subject, "stylist-pause", 1, Duration.ofHours(24));
+        assertThat(rateLimiter.isExhausted(subject, "stylist-pause", 1)).isTrue();
+
+        clock.advance(Duration.ofHours(24).plusSeconds(1));
+
+        assertThat(rateLimiter.isExhausted(subject, "stylist-pause", 1)).isFalse();
+    }
+
+    @Test
+    void isExhausted_neverStartsAWindowSoALaterConsumeGetsTheFullWindow() {
+        String subject = UUID.randomUUID().toString();
+        assertThat(rateLimiter.isExhausted(subject, "stylist-pause", 1)).isFalse();
+
+        clock.advance(Duration.ofHours(20));
+        rateLimiter.tryConsume(subject, "stylist-pause", 1, Duration.ofHours(24));
+        clock.advance(Duration.ofHours(23));
+
+        assertThat(rateLimiter.isExhausted(subject, "stylist-pause", 1)).isTrue();
+    }
+
+    @Test
+    void isExhausted_otherOperationKeysAndSubjects_areIndependent() {
+        String subject = UUID.randomUUID().toString();
+        rateLimiter.tryConsume(subject, "stylist-pause", 1, Duration.ofHours(24));
+
+        assertThat(rateLimiter.isExhausted(subject, "stylist-strike", 1)).isFalse();
+        assertThat(rateLimiter.isExhausted(UUID.randomUUID().toString(), "stylist-pause", 1)).isFalse();
+    }
 }

@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_products_text_embedding_hnsw ON products USING hnsw ((text_embedding::halfvec(2000)) halfvec_cosine_ops) WITH (m = 16, ef_construction = 64);

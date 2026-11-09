@@ -30,32 +30,26 @@ class BudgetCeilingResolverTest {
     }
 
     @Test
-    void resolveNullable_nullBudget_returnsNull() {
-        assertThat(resolver.resolveNullable(null)).isNull();
+    void remainingForSlot_nullBudget_returnsTheSameUnlimitedSentinelAsResolve() {
+        assertThat(resolver.remainingForSlot(new BigDecimal("100"), new BigDecimal("40"), null))
+                .isEqualByComparingTo(resolver.resolve(null));
     }
 
     @Test
-    void resolveNullable_realBudget_appliesTolerance() {
-        assertThat(resolver.resolveNullable(new BigDecimal("100"))).isEqualByComparingTo(new BigDecimal("110.00"));
+    void remainingForSlot_occupiedSlot_isCeilingMinusEverythingExceptTheOutgoingItem() {
+        assertThat(resolver.remainingForSlot(new BigDecimal("100"), new BigDecimal("40"), new BigDecimal("100")))
+                .isEqualByComparingTo("50.00");
     }
 
     @Test
-    void exceedsBudget_nullCeiling_neverExceeds() {
-        assertThat(resolver.exceedsBudget(new BigDecimal("500"), new BigDecimal("10"), new BigDecimal("1000"), null))
-                .isFalse();
+    void remainingForSlot_emptySlotWithZeroOutgoingPrice_isCeilingMinusTheWholeOutfit() {
+        assertThat(resolver.remainingForSlot(new BigDecimal("80"), BigDecimal.ZERO, new BigDecimal("100")))
+                .isEqualByComparingTo("30.00");
     }
 
     @Test
-    void exceedsBudget_projectedTotalOverCeiling_returnsTrue() {
-        assertThat(resolver.exceedsBudget(
-                new BigDecimal("100"), new BigDecimal("40"), new BigDecimal("51"), new BigDecimal("110")))
-                .isTrue();
-    }
-
-    @Test
-    void exceedsBudget_projectedTotalWithinCeiling_returnsFalse() {
-        assertThat(resolver.exceedsBudget(
-                new BigDecimal("100"), new BigDecimal("40"), new BigDecimal("45"), new BigDecimal("110")))
-                .isFalse();
+    void remainingForSlot_restOfOutfitAlreadyAboveCeiling_isFlooredAtZero() {
+        assertThat(resolver.remainingForSlot(new BigDecimal("200"), new BigDecimal("10"), new BigDecimal("100")))
+                .isEqualByComparingTo(BigDecimal.ZERO);
     }
 }

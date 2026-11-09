@@ -1,10 +1,9 @@
 package com.sewlect.outfit.controller;
 
-import com.sewlect.common.ratelimit.RateLimiter;
-import com.sewlect.identity.service.UserReferenceQueryService;
+import com.sewlect.outfit.service.PromptGenerationQuotaService;
 import com.sewlect.outfit.service.PromptOutfitGenerationService;
-import com.sewlect.outfit.support.PromptRateLimitResolver;
 import com.sewlect.outfit.service.PromptRefinementService;
+import com.sewlect.outfit.support.SlotEditTargetResolver;
 import com.sewlect.support.WebSliceTestConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,13 +43,10 @@ class PromptControllerTest {
     private PromptRefinementService promptRefinementService;
 
     @MockitoBean
-    private RateLimiter inMemoryRateLimiter;
+    private PromptGenerationQuotaService promptGenerationQuotaService;
 
     @MockitoBean
-    private PromptRateLimitResolver promptRateLimitResolver;
-
-    @MockitoBean
-    private UserReferenceQueryService userReferenceQueryService;
+    private SlotEditTargetResolver slotEditTargetResolver;
 
     @Test
     void generate_blankPrompt_returns400AndNeverInvokesService() throws Exception {
@@ -91,5 +87,27 @@ class PromptControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(promptRefinementService);
+    }
+
+    @Test
+    void refineEmptySlot_blankPrompt_returns400AndNeverConsumesRateLimitOrRefines() throws Exception {
+        mockMvc.perform(post("/api/v1/outfits/{outfitId}/slots/{role}/refine", UUID.randomUUID(), "ACCESSORY")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\": \"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        verifyNoInteractions(promptGenerationQuotaService, slotEditTargetResolver, promptRefinementService);
+    }
+
+    @Test
+    void refineEmptySlot_unknownRoleValue_returns400AndNeverConsumesRateLimitOrRefines() throws Exception {
+        mockMvc.perform(post("/api/v1/outfits/{outfitId}/slots/{role}/refine", UUID.randomUUID(), "accessory")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\": \"a belt\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        verifyNoInteractions(promptGenerationQuotaService, slotEditTargetResolver, promptRefinementService);
     }
 }

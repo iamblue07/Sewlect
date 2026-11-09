@@ -1,11 +1,11 @@
 package com.sewlect.outfit.service;
 
-import com.sewlect.common.ai.properties.OllamaCloudProperties;
 import com.sewlect.common.exception.ExternalServiceException;
 import com.sewlect.common.logging.support.ExternalCallLogger;
 import com.sewlect.common.taxonomy.enums.GarmentRole;
 import com.sewlect.outfit.properties.OutfitPromptProperties;
 import com.sewlect.outfit.domain.StructuredPromptQuery;
+import com.sewlect.outfit.support.OutfitShapeValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,10 +15,9 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.ollama.OllamaChatModel;
-import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 
-import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,7 +30,7 @@ import static org.mockito.Mockito.when;
 class PromptExtractionServiceTest {
 
     @Mock
-    private OllamaChatModel ollamaCloudChatModel;
+    private OpenAiChatModel chatModel;
 
     @Mock
     private ExternalCallLogger externalCallLogger;
@@ -42,11 +41,9 @@ class PromptExtractionServiceTest {
     void setUp() {
         OutfitPromptProperties properties = new OutfitPromptProperties(2, 3, 200, 200, 50);
         service = new PromptExtractionService(
-                ollamaCloudChatModel, properties,
-                new OllamaCloudProperties("https://ollama.com", "test-key", "gpt-oss:20b-cloud",
-                        Duration.ofSeconds(5), Duration.ofSeconds(60), 1, Duration.ofSeconds(2)),
-                externalCallLogger);
-        lenient().when(ollamaCloudChatModel.getOptions()).thenReturn(OllamaChatOptions.builder().build());
+                chatModel, properties,
+                externalCallLogger, new OutfitShapeValidator());
+        lenient().when(chatModel.getOptions()).thenReturn(OpenAiChatOptions.builder().build());
     }
 
     @Test
@@ -172,12 +169,12 @@ class PromptExtractionServiceTest {
 
         assertThatThrownBy(() -> service.extract("break the parser please"))
                 .isInstanceOf(ExternalServiceException.class)
-                .hasMessageContaining("Ollama Cloud prompt extraction failed");
+                .hasMessageContaining("DeepInfra prompt extraction failed");
     }
 
     @Test
     void extract_chatModelThrows_wrapsInExternalServiceException() {
-        when(ollamaCloudChatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("connection refused"));
+        when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("connection refused"));
 
         assertThatThrownBy(() -> service.extract("network is down"))
                 .isInstanceOf(ExternalServiceException.class)
@@ -217,6 +214,6 @@ class PromptExtractionServiceTest {
 
     private void stubChatResponse(String text) {
         ChatResponse response = new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
-        lenient().when(ollamaCloudChatModel.call(any(Prompt.class))).thenReturn(response);
+        lenient().when(chatModel.call(any(Prompt.class))).thenReturn(response);
     }
 }

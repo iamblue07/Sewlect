@@ -1,7 +1,7 @@
 package com.sewlect.outfit.support;
 
 import com.sewlect.common.cache.support.CacheSwitch;
-import com.sewlect.outfit.dto.OutfitResponse;
+import com.sewlect.outfit.domain.OutfitView;
 import com.sewlect.outfit.properties.OutfitViewCacheProperties;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,25 +20,25 @@ import java.util.UUID;
 @AllArgsConstructor
 public class OutfitViewCache {
 
-    private static final String KEY_PREFIX = "sewlect:outfit:view:v1:";
+    private static final String KEY_PREFIX = "sewlect:outfit:view:v3:";
 
-    private final RedisTemplate<String, OutfitResponse> outfitViewRedisTemplate;
+    private final RedisTemplate<String, OutfitView> outfitViewRedisTemplate;
     private final CacheSwitch cacheSwitch;
     private final OutfitViewCacheProperties properties;
 
-    public Map<UUID, OutfitResponse> getAll(List<UUID> outfitIds) {
+    public Map<UUID, OutfitView> getAll(List<UUID> outfitIds) {
         if (!cacheSwitch.isActive() || outfitIds.isEmpty()) {
             return Map.of();
         }
         try {
             List<String> keys = outfitIds.stream().map(this::keyFor).toList();
-            List<OutfitResponse> values = outfitViewRedisTemplate.opsForValue().multiGet(keys);
+            List<OutfitView> values = outfitViewRedisTemplate.opsForValue().multiGet(keys);
             if (values == null) {
                 return Map.of();
             }
-            Map<UUID, OutfitResponse> hits = new HashMap<>();
+            Map<UUID, OutfitView> hits = new HashMap<>();
             for (int i = 0; i < outfitIds.size(); i++) {
-                OutfitResponse value = values.get(i);
+                OutfitView value = values.get(i);
                 if (value != null) {
                     hits.put(outfitIds.get(i), value);
                 }
@@ -50,7 +50,7 @@ public class OutfitViewCache {
         }
     }
 
-    public void putAll(Map<UUID, OutfitResponse> responses) {
+    public void putAll(Map<UUID, OutfitView> responses) {
         if (!cacheSwitch.isActive() || responses.isEmpty()) {
             return;
         }

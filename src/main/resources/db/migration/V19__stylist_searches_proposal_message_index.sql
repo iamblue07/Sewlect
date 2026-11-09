@@ -1,0 +1,1 @@
+CREATE INDEX idx_stylist_searches_proposal_message_id ON stylist_searches (proposal_message_id);

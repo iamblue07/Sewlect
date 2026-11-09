@@ -1,6 +1,11 @@
 package com.sewlect.identity.service;
 
+import com.sewlect.common.ratelimit.RateLimiter;
+import com.sewlect.identity.properties.PasswordChangeProperties;
 import com.sewlect.common.exception.ConflictException;
+import com.sewlect.identity.dto.ChangePasswordRequest;
+import com.sewlect.common.exception.RateLimitExceededException;
+import com.sewlect.common.exception.BadRequestException;
 import com.sewlect.common.exception.UnauthorizedException;
 import com.sewlect.common.logging.support.SecurityEventLogger;
 import com.sewlect.common.security.properties.JwtProperties;
@@ -20,15 +25,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,6 +45,8 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -69,6 +77,9 @@ class AuthServiceTest {
     @Mock
     private SecurityEventLogger securityEventLogger;
 
+    @Mock
+    private RateLimiter rateLimiter;
+
     private AuthService authService;
 
     @BeforeEach
@@ -77,7 +88,8 @@ class AuthServiceTest {
                 "unused-by-authservice-directly", Duration.ofMinutes(15), Duration.ofDays(7),
                 "https://sewlect.local", "sewlect-api");
         authService = new AuthService(userRepository, userProfileRepository, refreshTokenRepository,
-                passwordEncoder, authenticationManager, jwtService, jwtProperties, securityEventLogger);
+                passwordEncoder, authenticationManager, jwtService, jwtProperties, securityEventLogger,
+                rateLimiter, new PasswordChangeProperties(5, Duration.ofMinutes(15)), Clock.systemDefaultZone());
     }
 
     private User buildUser(String email, Role role) {
@@ -322,22 +334,17 @@ class AuthServiceTest {
         User owner = buildUser("victim@example.com", Role.USER);
         RefreshToken reusedToken = buildRefreshToken(owner, "stolen-token-hash",
                 LocalDateTime.now().plusDays(1), LocalDateTime.now().minusHours(1));
-        RefreshToken otherActiveToken1 = buildRefreshToken(owner, "other-hash-1", LocalDateTime.now().plusDays(2), null);
-        RefreshToken otherActiveToken2 = buildRefreshToken(owner, "other-hash-2", LocalDateTime.now().plusDays(3), null);
         RefreshRequest request = new RefreshRequest("raw-stolen-token");
 
         when(jwtService.hashToken("raw-stolen-token")).thenReturn("stolen-token-hash");
         when(refreshTokenRepository.findByTokenHash("stolen-token-hash")).thenReturn(Optional.of(reusedToken));
-        when(refreshTokenRepository.findByUser_IdAndRevokedAtIsNull(owner.getId()))
-                .thenReturn(List.of(otherActiveToken1, otherActiveToken2));
+        when(refreshTokenRepository.revokeAllActiveByUserId(eq(owner.getId()), any(LocalDateTime.class))).thenReturn(2);
 
         assertThatThrownBy(() -> authService.refresh(request))
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("Invalid refresh token");
 
-        assertThat(otherActiveToken1.getRevokedAt()).isNotNull();
-        assertThat(otherActiveToken2.getRevokedAt()).isNotNull();
-        verify(refreshTokenRepository).saveAll(List.of(otherActiveToken1, otherActiveToken2));
+        verify(refreshTokenRepository, times(1)).revokeAllActiveByUserId(eq(owner.getId()), any(LocalDateTime.class));
     }
 
     @Test
@@ -345,14 +352,11 @@ class AuthServiceTest {
         User owner = buildUser("victim@example.com", Role.USER);
         RefreshToken reusedToken = buildRefreshToken(owner, "stolen-token-hash",
                 LocalDateTime.now().plusDays(1), LocalDateTime.now().minusHours(1));
-        RefreshToken otherActiveToken1 = buildRefreshToken(owner, "other-hash-1", LocalDateTime.now().plusDays(2), null);
-        RefreshToken otherActiveToken2 = buildRefreshToken(owner, "other-hash-2", LocalDateTime.now().plusDays(3), null);
         RefreshRequest request = new RefreshRequest("raw-stolen-token");
 
         when(jwtService.hashToken("raw-stolen-token")).thenReturn("stolen-token-hash");
         when(refreshTokenRepository.findByTokenHash("stolen-token-hash")).thenReturn(Optional.of(reusedToken));
-        when(refreshTokenRepository.findByUser_IdAndRevokedAtIsNull(owner.getId()))
-                .thenReturn(List.of(otherActiveToken1, otherActiveToken2));
+        when(refreshTokenRepository.revokeAllActiveByUserId(eq(owner.getId()), any(LocalDateTime.class))).thenReturn(2);
 
         assertThatThrownBy(() -> authService.refresh(request))
                 .isInstanceOf(UnauthorizedException.class);
@@ -442,5 +446,139 @@ class AuthServiceTest {
 
         verify(refreshTokenRepository, never()).save(any(RefreshToken.class));
         verifyNoInteractions(securityEventLogger);
+    }
+
+    // ---- changePassword ----
+
+    @Test
+    void changePassword_attemptBudgetExhausted_throwsRateLimitExceededWithoutCheckingThePassword() {
+        UUID userId = UUID.randomUUID();
+        when(rateLimiter.tryConsume(userId.toString(), "password-change", 5, Duration.ofMinutes(15))).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.changePassword(userId,
+                new ChangePasswordRequest("old-password", "brand-new-password")))
+                .isInstanceOf(RateLimitExceededException.class);
+
+        verifyNoInteractions(passwordEncoder, userRepository, refreshTokenRepository, securityEventLogger);
+    }
+
+    @Test
+    void changePassword_consumesTheRateLimitBeforeCheckingTheCurrentPassword() {
+        User user = buildUser("user@example.com", Role.USER);
+        when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong-password", "existing-hash")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.changePassword(user.getId(),
+                new ChangePasswordRequest("wrong-password", "brand-new-password")))
+                .isInstanceOf(BadRequestException.class);
+
+        InOrder order = inOrder(rateLimiter, passwordEncoder);
+        order.verify(rateLimiter).tryConsume(user.getId().toString(), "password-change", 5, Duration.ofMinutes(15));
+        order.verify(passwordEncoder).matches("wrong-password", "existing-hash");
+    }
+
+    @Test
+    void changePassword_wrongCurrentPassword_throwsBadRequestAuditsARejectionAndChangesNothing() {
+        User user = buildUser("user@example.com", Role.USER);
+        when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong-password", "existing-hash")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.changePassword(user.getId(),
+                new ChangePasswordRequest("wrong-password", "brand-new-password")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("The current password is incorrect");
+
+        verify(securityEventLogger).passwordChangeRejected(user.getId());
+        verify(userRepository, never()).save(any(User.class));
+        verify(refreshTokenRepository, never()).revokeAllActiveByUserId(any(), any());
+        verify(jwtService, never()).generateAccessToken(any());
+        assertThat(user.getPasswordHash()).isEqualTo("existing-hash");
+    }
+
+    @Test
+    void changePassword_newPasswordEqualToCurrent_throwsBadRequestAndChangesNothing() {
+        User user = buildUser("user@example.com", Role.USER);
+        when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("same-password", "existing-hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.changePassword(user.getId(),
+                new ChangePasswordRequest("same-password", "same-password")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("The new password must differ from the current one");
+
+        verify(userRepository, never()).save(any(User.class));
+        verify(passwordEncoder, never()).encode(any());
+        verify(securityEventLogger, never()).passwordChanged(any(), anyInt());
+    }
+
+    @Test
+    void changePassword_success_storesTheNewHashRevokesEveryActiveTokenAndIssuesAFreshPair() {
+        User user = buildUser("user@example.com", Role.USER);
+        when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("old-password", "existing-hash")).thenReturn(true);
+        when(passwordEncoder.encode("brand-new-password")).thenReturn("new-hash");
+        when(refreshTokenRepository.revokeAllActiveByUserId(eq(user.getId()), any(LocalDateTime.class))).thenReturn(2);
+        stubTokenIssuance();
+
+        AuthResponse response = authService.changePassword(user.getId(),
+                new ChangePasswordRequest("old-password", "brand-new-password"));
+
+        assertThat(user.getPasswordHash()).isEqualTo("new-hash");
+        InOrder order = inOrder(userRepository, refreshTokenRepository);
+        order.verify(userRepository).save(user);
+        order.verify(refreshTokenRepository).revokeAllActiveByUserId(eq(user.getId()), any(LocalDateTime.class));
+        assertThat(response.accessToken()).isEqualTo("access-token");
+        assertThat(response.refreshToken()).isEqualTo("raw-refresh-token");
+    }
+
+    @Test
+    void changePassword_success_auditsAPasswordChangeWithTheRevokedCountNeverATheftDetection() {
+        User user = buildUser("user@example.com", Role.USER);
+        when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("old-password", "existing-hash")).thenReturn(true);
+        when(passwordEncoder.encode("brand-new-password")).thenReturn("new-hash");
+        when(refreshTokenRepository.revokeAllActiveByUserId(eq(user.getId()), any(LocalDateTime.class))).thenReturn(2);
+        stubTokenIssuance();
+
+        authService.changePassword(user.getId(), new ChangePasswordRequest("old-password", "brand-new-password"));
+
+        verify(securityEventLogger).passwordChanged(user.getId(), 2);
+        verify(securityEventLogger, never()).refreshTokenReuseDetected(any(), anyInt());
+        verify(securityEventLogger, never()).passwordChangeRejected(any());
+    }
+
+    @Test
+    void changePassword_noActiveTokens_stillSucceedsAndAuditsZeroRevoked() {
+        User user = buildUser("user@example.com", Role.USER);
+        when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("old-password", "existing-hash")).thenReturn(true);
+        when(passwordEncoder.encode("brand-new-password")).thenReturn("new-hash");
+        when(refreshTokenRepository.revokeAllActiveByUserId(eq(user.getId()), any(LocalDateTime.class))).thenReturn(0);
+        stubTokenIssuance();
+
+        AuthResponse response = authService.changePassword(user.getId(),
+                new ChangePasswordRequest("old-password", "brand-new-password"));
+
+        assertThat(response.accessToken()).isEqualTo("access-token");
+        verify(securityEventLogger).passwordChanged(eq(user.getId()), eq(0));
+    }
+
+    @Test
+    void changePassword_userNoLongerExists_throwsIllegalState() {
+        UUID userId = UUID.randomUUID();
+        when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.changePassword(userId,
+                new ChangePasswordRequest("old-password", "brand-new-password")))
+                .isInstanceOf(IllegalStateException.class);
+
+        verifyNoInteractions(passwordEncoder);
     }
 }

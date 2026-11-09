@@ -3,7 +3,10 @@ package com.sewlect.common.taxonomy.support;
 import com.sewlect.common.taxonomy.enums.GarmentRole;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GarmentRoleResolverTest {
 
@@ -55,5 +58,31 @@ class GarmentRoleResolverTest {
         // Deliberately unlike the color resolver: article_type is a controlled dataset field,
         // so exact match is correct here and case-folding would mask a real data problem.
         assertThat(resolver.resolve("tshirts")).isEmpty();
+    }
+
+    @Test
+    void articleTypesByRole_coversEveryRoleWithSortedArticleTypes() {
+        Map<GarmentRole, List<String>> byRole = resolver.articleTypesByRole();
+
+        assertThat(byRole).containsOnlyKeys(GarmentRole.values());
+        byRole.values().forEach(articleTypes -> assertThat(articleTypes).isSorted().doesNotHaveDuplicates());
+        assertThat(byRole.get(GarmentRole.TOP)).contains("Tshirts", "Shirts");
+        assertThat(byRole.get(GarmentRole.FOOTWEAR)).contains("Casual Shoes", "Heels");
+    }
+
+    @Test
+    void articleTypesByRole_agreesWithResolveForEveryArticleType() {
+        resolver.articleTypesByRole().forEach((role, articleTypes) ->
+                articleTypes.forEach(articleType -> assertThat(resolver.resolve(articleType)).contains(role)));
+    }
+
+    @Test
+    void articleTypesByRole_isUnmodifiable() {
+        Map<GarmentRole, List<String>> byRole = resolver.articleTypesByRole();
+
+        assertThatThrownBy(() -> byRole.put(GarmentRole.TOP, List.of()))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> byRole.get(GarmentRole.TOP).add("Capes"))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 }

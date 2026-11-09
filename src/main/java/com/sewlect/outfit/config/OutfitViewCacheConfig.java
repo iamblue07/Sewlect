@@ -1,6 +1,6 @@
 package com.sewlect.outfit.config;
 
-import com.sewlect.outfit.dto.OutfitResponse;
+import com.sewlect.outfit.domain.OutfitView;
 import com.sewlect.outfit.properties.OutfitViewCacheProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -16,12 +16,12 @@ import tools.jackson.databind.json.JsonMapper;
 public class OutfitViewCacheConfig {
 
     @Bean
-    public RedisTemplate<String, OutfitResponse> outfitViewRedisTemplate(RedisConnectionFactory redisConnectionFactory,
+    public RedisTemplate<String, OutfitView> outfitViewRedisTemplate(RedisConnectionFactory redisConnectionFactory,
                                                                          JsonMapper jsonMapper) {
-        RedisTemplate<String, OutfitResponse> template = new RedisTemplate<>();
+        RedisTemplate<String, OutfitView> template = new RedisTemplate<>();
         template.setConnectionFactory(redisConnectionFactory);
         template.setKeySerializer(RedisSerializer.string());
-        template.setValueSerializer(new JacksonJsonRedisSerializer<>(jsonMapper, OutfitResponse.class));
+        template.setValueSerializer(new JacksonJsonRedisSerializer<>(jsonMapper, OutfitView.class));
         return template;
     }
 }

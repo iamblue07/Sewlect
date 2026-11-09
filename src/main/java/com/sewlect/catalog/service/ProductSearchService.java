@@ -2,12 +2,9 @@ package com.sewlect.catalog.service;
 
 import com.sewlect.catalog.entity.Product;
 import com.sewlect.catalog.repository.ProductRepository;
+import com.sewlect.common.persistence.util.VectorLiteralFormatter;
 import com.sewlect.common.taxonomy.enums.GarmentRole;
 import lombok.AllArgsConstructor;
-import org.springframework.data.domain.Limit;
-import org.springframework.data.domain.Score;
-import org.springframework.data.domain.ScoringFunction;
-import org.springframework.data.domain.SearchResults;
 import org.springframework.data.domain.Vector;
 import org.springframework.stereotype.Service;
 
@@ -21,8 +18,6 @@ import java.util.UUID;
 @AllArgsConstructor
 public class ProductSearchService {
 
-    public static final Score UNBOUNDED_COSINE_DISTANCE = Score.of(2.0, ScoringFunction.cosine());
-
     private final ProductRepository productRepository;
 
     public List<Product> findEligible(GarmentRole role, Set<String> genders, BigDecimal priceCeiling) {
@@ -30,22 +25,24 @@ public class ProductSearchService {
                 role, genders, priceCeiling);
     }
 
-    public List<Product> findAlternatives(String articleType, Set<String> genders, UUID excludeProductId, Limit limit) {
-        return productRepository.findByArticleTypeAndGenderInAndIdNotAndPrimaryColorIsNotNullAndTextEmbeddingIsNotNull(
-                articleType, genders, excludeProductId, limit);
+    public List<Product> findNearest(GarmentRole role, Set<String> genders, BigDecimal priceCeiling,
+                                     Vector reference, int limit) {
+        return productRepository.findNearestByRole(
+                role.name(), genders, priceCeiling, VectorLiteralFormatter.format(reference.toFloatArray()), limit);
     }
 
-    public SearchResults<Product> findNearest(GarmentRole role, Set<String> genders, BigDecimal priceCeiling,
-                                              Vector referenceEmbedding, Score score, Limit limit) {
-        return productRepository.searchByGarmentRoleAndGenderInAndBasePriceLessThanEqualAndTextEmbeddingNear(
-                role, genders, priceCeiling, referenceEmbedding, score, limit);
+    public List<Product> findNearestByOccasion(GarmentRole role, Set<String> genders, BigDecimal priceCeiling,
+                                               String occasion, Vector reference, int limit) {
+        return productRepository.findNearestByRoleAndOccasion(
+                role.name(), genders, priceCeiling, occasion, VectorLiteralFormatter.format(reference.toFloatArray()),
+                limit);
     }
 
-    public SearchResults<Product> findNearestByOccasion(GarmentRole role, Set<String> genders, BigDecimal priceCeiling,
-                                                        String occasion, Vector referenceEmbedding,
-                                                        Score score, Limit limit) {
-        return productRepository.searchByGarmentRoleAndGenderInAndBasePriceLessThanEqualAndOccasionAndTextEmbeddingNear(
-                role, genders, priceCeiling, occasion, referenceEmbedding, score, limit);
+    public List<Product> findNearestOfArticleType(String articleType, Set<String> genders, BigDecimal priceCeiling,
+                                                  UUID excludedProductId, Vector reference, int limit) {
+        return productRepository.findNearestOfArticleType(
+                articleType, genders, priceCeiling, excludedProductId,
+                VectorLiteralFormatter.format(reference.toFloatArray()), limit);
     }
 
     public Optional<Product> findById(UUID productId) {

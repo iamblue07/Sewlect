@@ -15,14 +15,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,35 +49,93 @@ class FeedRankingServiceTest {
     }
 
     @Test
-    void rankScore_bothSignalsNeutral_equalsCompatibilityScoreExactly() {
+    void rankScores_bothSignalsNeutral_equalsCompatibilityScoreExactly() {
         UserProfile profile = profileWith(null);
         Outfit outfit = outfitWith("0.8000");
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result).isEqualByComparingTo("0.8000");
     }
 
     @Test
-    void rankScore_perfectPersonalization_appliesUpperMultiplierBound() {
+    void rankScores_perfectPersonalization_appliesUpperMultiplierBound() {
         UserProfile profile = profileWith(new BigDecimal("100"));
         Outfit outfit = outfitWith("0.8000");
+        UUID tag = UUID.randomUUID();
+        stubOutfitTags(outfit, tag);
         stubTotalPrice(outfit, new BigDecimal("100"));
 
-        BigDecimal result = service.rankScore(profile, outfit, perfectStyleOverlap());
+        BigDecimal result = scoreOf(profile, outfit, Set.of(tag));
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("0.8000").multiply(new BigDecimal("1.15")));
     }
 
     @Test
-    void rankScore_worstPersonalization_appliesLowerMultiplierBound() {
+    void rankScores_worstPersonalization_appliesLowerMultiplierBound() {
         UserProfile profile = profileWith(new BigDecimal("100"));
         Outfit outfit = outfitWith("0.8000");
+        stubOutfitTags(outfit, UUID.randomUUID());
         stubTotalPrice(outfit, new BigDecimal("1000"));
 
-        BigDecimal result = service.rankScore(profile, outfit, zeroStyleOverlap());
+        BigDecimal result = scoreOf(profile, outfit, Set.of(UUID.randomUUID()));
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("0.8000").multiply(new BigDecimal("0.85")));
+    }
+
+    @Test
+    void rankScores_noOutfits_returnsAnEmptyMapWithoutQuerying() {
+        assertThat(service.rankScores(profileWith(new BigDecimal("100")), List.of(), Set.of(UUID.randomUUID())))
+                .isEmpty();
+        verifyNoInteractions(outfitItemQueryService, productStyleTagQueryService);
+    }
+
+    @Test
+    void rankScores_manyOutfits_loadsProductsTagsAndPricesOnceForTheWholeBatch() {
+        UserProfile profile = profileWith(new BigDecimal("100"));
+        Outfit first = outfitWith("1.0000");
+        Outfit second = outfitWith("0.5000");
+        Outfit third = outfitWith("0.2500");
+        List<UUID> outfitIds = List.of(first.getId(), second.getId(), third.getId());
+        UUID firstProduct = UUID.randomUUID();
+        UUID sharedProduct = UUID.randomUUID();
+        UUID thirdProduct = UUID.randomUUID();
+        UUID tag = UUID.randomUUID();
+        when(outfitItemQueryService.findProductIdsForOutfits(outfitIds)).thenReturn(Map.of(
+                first.getId(), List.of(firstProduct, sharedProduct),
+                second.getId(), List.of(sharedProduct),
+                third.getId(), List.of(thirdProduct)));
+        when(productStyleTagQueryService.findStyleTagIdsForProducts(any())).thenReturn(Map.of(sharedProduct, Set.of(tag)));
+        when(outfitItemQueryService.sumBasePriceForOutfits(outfitIds)).thenReturn(Map.of(
+                first.getId(), new BigDecimal("100"),
+                second.getId(), new BigDecimal("100"),
+                third.getId(), new BigDecimal("100")));
+
+        Map<UUID, BigDecimal> scores = service.rankScores(profile, List.of(first, second, third), Set.of(tag));
+
+        assertThat(scores).containsOnlyKeys(outfitIds);
+        assertThat(scores.get(first.getId())).isEqualByComparingTo(new BigDecimal("1.15"));
+        assertThat(scores.get(second.getId())).isEqualByComparingTo(new BigDecimal("0.5").multiply(new BigDecimal("1.15")));
+        assertThat(scores.get(third.getId())).isEqualByComparingTo(
+                new BigDecimal("0.2500").multiply(new BigDecimal("1.075")).setScale(4, RoundingMode.HALF_UP));
+        verify(outfitItemQueryService, times(1)).findProductIdsForOutfits(any());
+        verify(productStyleTagQueryService, times(1)).findStyleTagIdsForProducts(any());
+        verify(outfitItemQueryService, times(1)).sumBasePriceForOutfits(any());
+    }
+
+    @Test
+    void rankScores_productsSharedAcrossOutfits_areLookedUpOnlyOnce() {
+        UserProfile profile = profileWith(null);
+        Outfit first = outfitWith("1.0000");
+        Outfit second = outfitWith("1.0000");
+        UUID sharedProduct = UUID.randomUUID();
+        when(outfitItemQueryService.findProductIdsForOutfits(List.of(first.getId(), second.getId()))).thenReturn(Map.of(
+                first.getId(), List.of(sharedProduct), second.getId(), List.of(sharedProduct)));
+        when(productStyleTagQueryService.findStyleTagIdsForProducts(List.of(sharedProduct))).thenReturn(Map.of());
+
+        service.rankScores(profile, List.of(first, second), Set.of(UUID.randomUUID()));
+
+        verify(productStyleTagQueryService).findStyleTagIdsForProducts(List.of(sharedProduct));
     }
 
     @Test
@@ -84,21 +143,21 @@ class FeedRankingServiceTest {
         UserProfile profile = profileWith(null);
         Outfit outfit = outfitWith("0.5000");
 
-        service.rankScore(profile, outfit, noStylePreferences());
+        scoreOf(profile, outfit, noStylePreferences());
 
-        verify(outfitItemQueryService, never()).findProductIds(any());
-        verify(productStyleTagQueryService, never()).findStyleTagIdsByProductIds(any());
+        verifyNoInteractions(productStyleTagQueryService);
+        verify(outfitItemQueryService, times(0)).findProductIdsForOutfits(any());
     }
 
     @Test
     void styleOverlap_outfitHasNoStyleTagsButUserHasPreferences_isNeutral() {
         UserProfile profile = profileWith(null);
         Outfit outfit = outfitWith("0.5000");
-        UUID preferredTag = UUID.randomUUID();
-        when(outfitItemQueryService.findProductIds(outfit.getId())).thenReturn(List.of(UUID.randomUUID()));
-        when(productStyleTagQueryService.findStyleTagIdsByProductIds(any())).thenReturn(List.of());
+        when(outfitItemQueryService.findProductIdsForOutfits(List.of(outfit.getId())))
+                .thenReturn(Map.of(outfit.getId(), List.of(UUID.randomUUID())));
+        when(productStyleTagQueryService.findStyleTagIdsForProducts(any())).thenReturn(Map.of());
 
-        BigDecimal result = service.rankScore(profile, outfit, Set.of(preferredTag));
+        BigDecimal result = scoreOf(profile, outfit, Set.of(UUID.randomUUID()));
 
         assertThat(result).isEqualByComparingTo("0.5000");
     }
@@ -110,10 +169,9 @@ class FeedRankingServiceTest {
         UUID tagA = UUID.randomUUID();
         UUID tagB = UUID.randomUUID();
         UUID tagC = UUID.randomUUID();
-        when(outfitItemQueryService.findProductIds(outfit.getId())).thenReturn(List.of(UUID.randomUUID()));
-        when(productStyleTagQueryService.findStyleTagIdsByProductIds(any())).thenReturn(List.of(tagA, tagC));
+        stubOutfitTags(outfit, tagA, tagC);
 
-        BigDecimal result = service.rankScore(profile, outfit, Set.of(tagA, tagB));
+        BigDecimal result = scoreOf(profile, outfit, Set.of(tagA, tagB));
 
         BigDecimal jaccard = BigDecimal.ONE.divide(new BigDecimal("3"), 10, RoundingMode.HALF_UP);
         BigDecimal expectedPersonalization = jaccard.multiply(new BigDecimal("0.5"))
@@ -131,10 +189,27 @@ class FeedRankingServiceTest {
         Outfit outfit = outfitWith("1.0000");
         UUID tagA = UUID.randomUUID();
         UUID tagB = UUID.randomUUID();
-        when(outfitItemQueryService.findProductIds(outfit.getId())).thenReturn(List.of(UUID.randomUUID()));
-        when(productStyleTagQueryService.findStyleTagIdsByProductIds(any())).thenReturn(List.of(tagA, tagB));
+        stubOutfitTags(outfit, tagA, tagB);
 
-        BigDecimal result = service.rankScore(profile, outfit, Set.of(tagA, tagB));
+        BigDecimal result = scoreOf(profile, outfit, Set.of(tagA, tagB));
+
+        assertThat(result).isEqualByComparingTo(new BigDecimal("1.0000").multiply(new BigDecimal("1.075")));
+    }
+
+    @Test
+    void styleOverlap_tagsSpreadOverSeveralProducts_areUnionedPerOutfit() {
+        UserProfile profile = profileWith(null);
+        Outfit outfit = outfitWith("1.0000");
+        UUID topProduct = UUID.randomUUID();
+        UUID shoeProduct = UUID.randomUUID();
+        UUID tagA = UUID.randomUUID();
+        UUID tagB = UUID.randomUUID();
+        when(outfitItemQueryService.findProductIdsForOutfits(List.of(outfit.getId())))
+                .thenReturn(Map.of(outfit.getId(), List.of(topProduct, shoeProduct)));
+        when(productStyleTagQueryService.findStyleTagIdsForProducts(any()))
+                .thenReturn(Map.of(topProduct, Set.of(tagA), shoeProduct, Set.of(tagB)));
+
+        BigDecimal result = scoreOf(profile, outfit, Set.of(tagA, tagB));
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("1.0000").multiply(new BigDecimal("1.075")));
     }
@@ -144,9 +219,9 @@ class FeedRankingServiceTest {
         UserProfile profile = profileWith(null);
         Outfit outfit = outfitWith("0.6000");
 
-        service.rankScore(profile, outfit, noStylePreferences());
+        scoreOf(profile, outfit, noStylePreferences());
 
-        verify(outfitItemQueryService, never()).sumBasePrice(any());
+        verify(outfitItemQueryService, times(0)).sumBasePriceForOutfits(any());
     }
 
     @Test
@@ -155,7 +230,7 @@ class FeedRankingServiceTest {
         Outfit outfit = outfitWith("1.0000");
         stubTotalPrice(outfit, new BigDecimal("200"));
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("1.0000").multiply(new BigDecimal("1.075")));
     }
@@ -166,7 +241,7 @@ class FeedRankingServiceTest {
         Outfit outfit = outfitWith("1.0000");
         stubTotalPrice(outfit, new BigDecimal("50"));
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("1.0000").multiply(new BigDecimal("1.075")));
     }
@@ -177,7 +252,7 @@ class FeedRankingServiceTest {
         Outfit outfit = outfitWith("1.0000");
         stubTotalPrice(outfit, new BigDecimal("110"));
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("1.0000").multiply(new BigDecimal("0.925")));
     }
@@ -188,7 +263,7 @@ class FeedRankingServiceTest {
         Outfit outfit = outfitWith("1.0000");
         stubTotalPrice(outfit, new BigDecimal("999999"));
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("1.0000").multiply(new BigDecimal("0.925")));
     }
@@ -199,7 +274,7 @@ class FeedRankingServiceTest {
         Outfit outfit = outfitWith("1.0000");
         stubTotalPrice(outfit, new BigDecimal("105"));
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result).isEqualByComparingTo("1.0000");
     }
@@ -210,7 +285,7 @@ class FeedRankingServiceTest {
         Outfit outfit = outfitWith("1.0000");
         stubTotalPrice(outfit, new BigDecimal("10"));
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("1.0000").multiply(new BigDecimal("0.925")));
     }
@@ -221,30 +296,23 @@ class FeedRankingServiceTest {
         Outfit outfit = outfitWith("1.0000");
         stubTotalPrice(outfit, BigDecimal.ZERO);
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result).isEqualByComparingTo(new BigDecimal("1.0000").multiply(new BigDecimal("1.075")));
     }
 
     @Test
-    void totalPrice_delegatesDirectlyToOutfitItemQueryService() {
-        Outfit outfit = outfitWith("1.0000");
-        when(outfitItemQueryService.sumBasePrice(outfit.getId())).thenReturn(new BigDecimal("123.45"));
-
-        BigDecimal result = service.totalPrice(outfit);
-
-        assertThat(result).isEqualByComparingTo("123.45");
-        verify(outfitItemQueryService).sumBasePrice(outfit.getId());
-    }
-
-    @Test
-    void rankScore_result_isAlwaysScaledToFourDecimalPlaces() {
+    void rankScores_result_isAlwaysScaledToFourDecimalPlaces() {
         UserProfile profile = profileWith(null);
         Outfit outfit = outfitWith("0.3333");
 
-        BigDecimal result = service.rankScore(profile, outfit, noStylePreferences());
+        BigDecimal result = scoreOf(profile, outfit, noStylePreferences());
 
         assertThat(result.scale()).isEqualTo(4);
+    }
+
+    private BigDecimal scoreOf(UserProfile profile, Outfit outfit, Set<UUID> preferredStyleTagIds) {
+        return service.rankScores(profile, List.of(outfit), preferredStyleTagIds).get(outfit.getId());
     }
 
     private UserProfile profileWith(BigDecimal budget) {
@@ -259,20 +327,16 @@ class FeedRankingServiceTest {
         return Set.of();
     }
 
-    private Set<UUID> perfectStyleOverlap() {
-        UUID tag = UUID.randomUUID();
-        when(outfitItemQueryService.findProductIds(any())).thenReturn(List.of(UUID.randomUUID()));
-        when(productStyleTagQueryService.findStyleTagIdsByProductIds(any())).thenReturn(List.of(tag));
-        return Set.of(tag);
-    }
-
-    private Set<UUID> zeroStyleOverlap() {
-        when(outfitItemQueryService.findProductIds(any())).thenReturn(List.of(UUID.randomUUID()));
-        when(productStyleTagQueryService.findStyleTagIdsByProductIds(any())).thenReturn(List.of(UUID.randomUUID()));
-        return Set.of(UUID.randomUUID());
+    private void stubOutfitTags(Outfit outfit, UUID... tagIds) {
+        UUID productId = UUID.randomUUID();
+        when(outfitItemQueryService.findProductIdsForOutfits(List.of(outfit.getId())))
+                .thenReturn(Map.of(outfit.getId(), List.of(productId)));
+        when(productStyleTagQueryService.findStyleTagIdsForProducts(List.of(productId)))
+                .thenReturn(Map.of(productId, Set.of(tagIds)));
     }
 
     private void stubTotalPrice(Outfit outfit, BigDecimal price) {
-        when(outfitItemQueryService.sumBasePrice(eq(outfit.getId()))).thenReturn(price);
+        when(outfitItemQueryService.sumBasePriceForOutfits(List.of(outfit.getId())))
+                .thenReturn(Map.of(outfit.getId(), price));
     }
 }

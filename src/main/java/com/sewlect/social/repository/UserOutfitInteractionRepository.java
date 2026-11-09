@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -36,5 +37,27 @@ public interface UserOutfitInteractionRepository extends JpaRepository<UserOutfi
             + "WHERE i.user.id = :userId AND i.interactionType = :interactionType")
     List<UUID> findOutfitIdsByUserIdAndInteractionType(@Param("userId") UUID userId,
                                                        @Param("interactionType") InteractionType interactionType);
+
+    @Query("SELECT i.outfit.id AS outfitId, COUNT(i) AS interactionCount FROM UserOutfitInteraction i "
+            + "WHERE i.outfit.id IN :outfitIds AND i.interactionType = :interactionType GROUP BY i.outfit.id")
+    List<OutfitInteractionCount> countByOutfitIdsAndInteractionType(@Param("outfitIds") Collection<UUID> outfitIds,
+                                                                    @Param("interactionType") InteractionType interactionType);
+
+    @Query("SELECT i.outfit.id AS outfitId, i.interactionType AS interactionType FROM UserOutfitInteraction i "
+            + "WHERE i.user.id = :userId AND i.outfit.id IN :outfitIds")
+    List<ViewerInteraction> findViewerInteractions(@Param("userId") UUID userId,
+                                                   @Param("outfitIds") Collection<UUID> outfitIds);
+
+    interface OutfitInteractionCount {
+        UUID getOutfitId();
+
+        long getInteractionCount();
+    }
+
+    interface ViewerInteraction {
+        UUID getOutfitId();
+
+        InteractionType getInteractionType();
+    }
 
 }

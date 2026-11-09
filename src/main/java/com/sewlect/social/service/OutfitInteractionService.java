@@ -34,10 +34,11 @@ public class OutfitInteractionService {
     private final OutfitItemQueryService outfitItemQueryService;
     private final OutfitResponseAssembler outfitResponseAssembler;
     private final UserReferenceQueryService userReferenceQueryService;
+    private final OutfitEngagementService outfitEngagementService;
 
     public InteractionStateResponse activate(UUID userId, UUID outfitId, InteractionType type) {
         if (userOutfitInteractionRepository.existsByUserIdAndOutfitIdAndInteractionType(userId, outfitId, type)) {
-            return new InteractionStateResponse(true);
+            return new InteractionStateResponse(true, outfitEngagementService.readOne(outfitId, userId));
         }
 
         Outfit outfit = outfitItemQueryService.getById(outfitId);
@@ -54,13 +55,13 @@ public class OutfitInteractionService {
             log.debug("Interaction {} already active for user {} and outfit {}", type, userId, outfitId);
         }
 
-        return new InteractionStateResponse(true);
+        return new InteractionStateResponse(true, outfitEngagementService.readOne(outfitId, userId));
     }
 
     @Transactional
     public InteractionStateResponse deactivate(UUID userId, UUID outfitId, InteractionType type) {
         userOutfitInteractionRepository.deleteByUserIdAndOutfitIdAndInteractionType(userId, outfitId, type);
-        return new InteractionStateResponse(false);
+        return new InteractionStateResponse(false, outfitEngagementService.readOne(outfitId, userId));
     }
 
     @Transactional(readOnly = true)
@@ -72,7 +73,7 @@ public class OutfitInteractionService {
                 .map(UserOutfitInteraction::getOutfit)
                 .toList();
 
-        List<OutfitResponse> items = outfitResponseAssembler.toResponses(outfits);
+        List<OutfitResponse> items = outfitResponseAssembler.toResponses(outfits, userId);
 
         return new SavedOutfitsResponse(items, page.getNumber(), page.getSize(),
                 page.getTotalElements(), page.getTotalPages());

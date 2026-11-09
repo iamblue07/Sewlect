@@ -4,6 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 @Component
@@ -33,8 +35,28 @@ public class SecurityEventLogger {
         log.info("event=token_rotation outcome=success userId={}", userId);
     }
 
+    public void passwordChanged(UUID userId, int revokedTokenCount) {
+        log.info("event=password_change outcome=success userId={} revokedTokens={}", userId, revokedTokenCount);
+    }
+
+    public void passwordChangeRejected(UUID userId) {
+        log.warn("event=password_change outcome=failure userId={}", userId);
+    }
+
     public void refreshTokenReuseDetected(UUID userId, int revokedTokenCount) {
         log.warn("event=token_reuse_detected outcome=all_tokens_revoked userId={} revokedTokens={}",
                 userId, revokedTokenCount);
+    }
+
+    public void stylistMessageBlocked(UUID userId, List<String> categories) {
+        log.warn("event=stylist_message_blocked userId={} categories={}", userId, String.join(",", categories));
+    }
+
+    public void stylistStrikeRecorded(UUID userId, String reason) {
+        log.warn("event=stylist_strike userId={} reason={}", userId, reason);
+    }
+
+    public void stylistPaused(UUID userId, Duration duration) {
+        log.warn("event=stylist_paused userId={} durationMinutes={}", userId, duration.toMinutes());
     }
 }

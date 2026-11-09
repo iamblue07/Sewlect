@@ -12,6 +12,10 @@ public class ExternalCallLogger {
 
     private static final Logger log = LoggerFactory.getLogger(EXTERNAL_LOGGER_NAME);
 
+    public static long elapsedMillisSince(long startedAtNanos) {
+        return (System.nanoTime() - startedAtNanos) / 1_000_000L;
+    }
+
     public void logCall(String provider, String operation, long durationMs, ExternalCallOutcome outcome) {
         if (outcome == ExternalCallOutcome.SUCCESS) {
             log.info("provider={} operation={} durationMs={} outcome={}",

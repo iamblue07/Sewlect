@@ -8,9 +8,12 @@ import com.sewlect.identity.service.UserReferenceQueryService;
 import com.sewlect.outfit.properties.OutfitPromptProperties;
 import com.sewlect.outfit.dto.OutfitResponse;
 import com.sewlect.outfit.dto.PromptGenerationRequest;
+import com.sewlect.outfit.service.PromptGenerationQuotaService;
+import com.sewlect.outfit.service.PromptGenerationQuotaService;
 import com.sewlect.outfit.service.PromptOutfitGenerationService;
 import com.sewlect.outfit.support.PromptRateLimitResolver;
 import com.sewlect.outfit.service.PromptRefinementService;
+import com.sewlect.outfit.support.SlotEditTargetResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,6 +44,9 @@ class PromptControllerRateLimitTest {
     @Mock
     private UserReferenceQueryService userReferenceQueryService;
 
+    @Mock
+    private SlotEditTargetResolver slotEditTargetResolver;
+
     private PromptController controller;
 
     @BeforeEach
@@ -50,9 +56,10 @@ class PromptControllerRateLimitTest {
         OutfitPromptProperties properties = new OutfitPromptProperties(2, 3, 200, 200, 50);
         PromptRateLimitResolver rateLimitResolver = new PromptRateLimitResolver(properties);
 
+        PromptGenerationQuotaService quotaService =
+                new PromptGenerationQuotaService(rateLimiter, rateLimitResolver, userReferenceQueryService);
         controller = new PromptController(
-                promptOutfitGenerationService, promptRefinementService, rateLimiter,
-                rateLimitResolver, userReferenceQueryService);
+                promptOutfitGenerationService, promptRefinementService, quotaService, slotEditTargetResolver);
     }
 
     @Test
@@ -60,7 +67,7 @@ class PromptControllerRateLimitTest {
         UUID userId = UUID.randomUUID();
         when(userReferenceQueryService.getById(userId)).thenReturn(User.builder().role(Role.USER).build());
         when(promptOutfitGenerationService.generate(any(), any(), anyBoolean()))
-                .thenReturn(List.of(new OutfitResponse(UUID.randomUUID(), null, null, null)));
+                .thenReturn(List.of(new OutfitResponse(UUID.randomUUID(), null, null, null, null)));
         Jwt jwt = jwtFor(userId);
         PromptGenerationRequest request = new PromptGenerationRequest("something casual", true);
 
@@ -77,7 +84,7 @@ class PromptControllerRateLimitTest {
         UUID adminId = UUID.randomUUID();
         when(userReferenceQueryService.getById(adminId)).thenReturn(User.builder().role(Role.ADMIN).build());
         when(promptOutfitGenerationService.generate(any(), any(), anyBoolean()))
-                .thenReturn(List.of(new OutfitResponse(UUID.randomUUID(), null, null, null)));
+                .thenReturn(List.of(new OutfitResponse(UUID.randomUUID(), null, null, null, null)));
         Jwt jwt = jwtFor(adminId);
         PromptGenerationRequest request = new PromptGenerationRequest("something casual", true);
 

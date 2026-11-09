@@ -1,5 +1,6 @@
 package com.sewlect.social.controller;
 
+import com.sewlect.outfit.domain.OutfitEngagement;
 import com.sewlect.social.dto.InteractionStateResponse;
 import com.sewlect.social.dto.SavedOutfitsResponse;
 import com.sewlect.social.enums.InteractionType;
@@ -55,7 +56,7 @@ class OutfitInteractionControllerSecurityTest {
     void like_validToken_isAuthorized() throws Exception {
         UUID outfitId = UUID.randomUUID();
         when(outfitInteractionService.activate(any(), eq(outfitId), eq(InteractionType.LIKE)))
-                .thenReturn(new InteractionStateResponse(true));
+                .thenReturn(new InteractionStateResponse(true, OutfitEngagement.none()));
 
         mockMvc.perform(post("/api/v1/outfits/{outfitId}/like", outfitId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + WebSliceTestConfig.accessToken()))
@@ -74,7 +75,7 @@ class OutfitInteractionControllerSecurityTest {
     void unlike_validToken_isAuthorized() throws Exception {
         UUID outfitId = UUID.randomUUID();
         when(outfitInteractionService.deactivate(any(), eq(outfitId), eq(InteractionType.LIKE)))
-                .thenReturn(new InteractionStateResponse(false));
+                .thenReturn(new InteractionStateResponse(false, OutfitEngagement.none()));
 
         mockMvc.perform(delete("/api/v1/outfits/{outfitId}/like", outfitId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + WebSliceTestConfig.accessToken()))
@@ -93,7 +94,7 @@ class OutfitInteractionControllerSecurityTest {
     void save_validToken_isAuthorized() throws Exception {
         UUID outfitId = UUID.randomUUID();
         when(outfitInteractionService.activate(any(), eq(outfitId), eq(InteractionType.SAVE)))
-                .thenReturn(new InteractionStateResponse(true));
+                .thenReturn(new InteractionStateResponse(true, OutfitEngagement.none()));
 
         mockMvc.perform(post("/api/v1/outfits/{outfitId}/save", outfitId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + WebSliceTestConfig.accessToken()))
@@ -112,7 +113,7 @@ class OutfitInteractionControllerSecurityTest {
     void unsave_validToken_isAuthorized() throws Exception {
         UUID outfitId = UUID.randomUUID();
         when(outfitInteractionService.deactivate(any(), eq(outfitId), eq(InteractionType.SAVE)))
-                .thenReturn(new InteractionStateResponse(false));
+                .thenReturn(new InteractionStateResponse(false, OutfitEngagement.none()));
 
         mockMvc.perform(delete("/api/v1/outfits/{outfitId}/save", outfitId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + WebSliceTestConfig.accessToken()))

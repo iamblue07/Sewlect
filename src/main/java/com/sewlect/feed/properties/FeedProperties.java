@@ -9,6 +9,7 @@ import org.springframework.validation.annotation.Validated;
 public record FeedProperties(
         @Positive int pageSize,
         @Positive int refillThreshold,
-        @Positive long refillLockTtlMs
+        @Positive long refillLockTtlMs,
+        @Positive int resetRateLimitPerHour
 ) {
 }

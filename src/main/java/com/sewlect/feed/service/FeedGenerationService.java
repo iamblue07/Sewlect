@@ -1,5 +1,7 @@
 package com.sewlect.feed.service;
 
+import com.sewlect.common.exception.RateLimitExceededException;
+import com.sewlect.common.ratelimit.RateLimiter;
 import com.sewlect.feed.properties.FeedProperties;
 import com.sewlect.feed.dto.FeedCursor;
 import com.sewlect.feed.dto.FeedPage;
@@ -22,8 +24,12 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -32,6 +38,8 @@ import java.util.UUID;
 @AllArgsConstructor
 @EnableConfigurationProperties(FeedProperties.class)
 public class FeedGenerationService {
+
+    private static final String RESET_OPERATION_KEY = "feed-reset";
 
     private final UserProfileQueryService userProfileQueryService;
     private final UserStylePreferenceQueryService userStylePreferenceQueryService;
@@ -47,25 +55,33 @@ public class FeedGenerationService {
 
     private final FeedProperties feedProperties;
     private final Clock clock;
+    private final RateLimiter rateLimiter;
 
     public void refillFor(UUID userId) {
         UserProfile profile = userProfileQueryService.getById(userId);
         List<Outfit> candidates = outfitCandidateGenerator.generate(profile);
         Set<UUID> preferredStyleTagIds = userStylePreferenceQueryService.findPreferredStyleTagIds(userId);
+        List<Outfit> unqueued = excludeAlreadyQueued(userId, candidates);
+        Map<UUID, BigDecimal> rankScores = feedRankingService.rankScores(profile, unqueued, preferredStyleTagIds);
 
         int saved = 0;
-        for (Outfit outfit : candidates) {
-            if (feedEntryRepository.existsByUserIdAndOutfitId(userId, outfit.getId())) {
-                continue;
-            }
-            BigDecimal rankScore = feedRankingService.rankScore(profile, outfit, preferredStyleTagIds);
-            if (feedEntryPersistenceService.saveIfAbsent(profile.getUser(), outfit, rankScore)) {
+        for (Outfit outfit : unqueued) {
+            if (feedEntryPersistenceService.saveIfAbsent(profile.getUser(), outfit, rankScores.get(outfit.getId()))) {
                 saved++;
             }
         }
 
         log.debug("Feed refill for user {}: {} candidates generated, {} new entries saved",
                 userId, candidates.size(), saved);
+    }
+
+    public void reset(UUID userId) {
+        if (!rateLimiter.tryConsume(userId.toString(), RESET_OPERATION_KEY,
+                feedProperties.resetRateLimitPerHour(), Duration.ofHours(1))) {
+            throw new RateLimitExceededException("Feed reset limit exceeded - try again later");
+        }
+        int deleted = feedEntryPersistenceService.deleteUnseen(userId);
+        log.debug("Feed reset for user {}: {} unseen entries deleted", userId, deleted);
     }
 
     public FeedPage getPage(UUID userId, String cursor, int pageSize) {
@@ -115,5 +131,21 @@ public class FeedGenerationService {
 
     private String encodeCursor(FeedEntry lastEntry) {
         return feedCursorCodec.encode(new FeedCursor(lastEntry.getRankScore(), lastEntry.getId()));
+    }
+
+    private List<Outfit> excludeAlreadyQueued(UUID userId, List<Outfit> candidates) {
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> candidateIds = candidates.stream().map(Outfit::getId).toList();
+        Set<UUID> queuedIds = new HashSet<>(feedEntryRepository.findOutfitIdsByUserIdAndOutfitIdIn(userId, candidateIds));
+
+        Map<UUID, Outfit> unqueued = new LinkedHashMap<>();
+        for (Outfit outfit : candidates) {
+            if (!queuedIds.contains(outfit.getId())) {
+                unqueued.putIfAbsent(outfit.getId(), outfit);
+            }
+        }
+        return List.copyOf(unqueued.values());
     }
 }

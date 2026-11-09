@@ -8,6 +8,7 @@ import com.sewlect.outfit.entity.Outfit;
 import com.sewlect.outfit.entity.OutfitItem;
 import com.sewlect.outfit.repository.OutfitItemRepository;
 import com.sewlect.outfit.repository.OutfitRepository;
+import com.sewlect.outfit.support.OutfitShapeValidator;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -33,9 +34,17 @@ public class OutfitItemQueryService {
 
     private final OutfitItemRepository outfitItemRepository;
     private final OutfitRepository outfitRepository;
+    private final OutfitShapeValidator outfitShapeValidator;
 
-    public List<UUID> findProductIds(UUID outfitId) {
-        return outfitItemRepository.findDistinctProductIdByOutfitId(outfitId);
+    public Map<UUID, List<UUID>> findProductIdsForOutfits(List<UUID> outfitIds) {
+        Map<UUID, List<UUID>> productIdsByOutfitId = new HashMap<>();
+        for (UUID outfitId : outfitIds) {
+            productIdsByOutfitId.put(outfitId, new ArrayList<>());
+        }
+        for (OutfitItemRepository.OutfitProductId row : outfitItemRepository.findProductIdsByOutfitIdIn(outfitIds)) {
+            productIdsByOutfitId.get(row.getOutfitId()).add(row.getProductId());
+        }
+        return productIdsByOutfitId;
     }
 
     public List<OutfitItemView> findItemViews(UUID outfitId) {
@@ -46,7 +55,8 @@ public class OutfitItemQueryService {
                         item.getProduct().getProductDisplayName(),
                         item.getProduct().getImageUrl(),
                         item.getProduct().getBasePrice(),
-                        item.getSlot()))
+                        item.getSlot(),
+                        outfitShapeValidator.isOptional(item.getSlot())))
                 .toList();
     }
 
@@ -62,7 +72,8 @@ public class OutfitItemQueryService {
                     item.getProduct().getProductDisplayName(),
                     item.getProduct().getImageUrl(),
                     item.getProduct().getBasePrice(),
-                    item.getSlot()));
+                    item.getSlot(),
+                    outfitShapeValidator.isOptional(item.getSlot())));
         }
         return viewsByOutfitId;
     }
@@ -82,24 +93,11 @@ public class OutfitItemQueryService {
         return totalsByOutfitId;
     }
 
-    public OutfitItemContext loadContext(UUID outfitId, UUID itemId) {
+    public List<OutfitItem> findItems(UUID outfitId) {
         outfitRepository.findById(outfitId)
                 .orElseThrow(() -> new ResourceNotFoundException("Outfit not found: " + outfitId));
 
-        List<OutfitItem> items = outfitItemRepository.findByOutfitId(outfitId);
-
-        OutfitItem targetItem = items.stream()
-                .filter(item -> item.getId().equals(itemId))
-                .findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Outfit item " + itemId + " not found in outfit " + outfitId));
-
-        List<Product> otherProducts = items.stream()
-                .filter(item -> !item.getId().equals(itemId))
-                .map(OutfitItem::getProduct)
-                .toList();
-
-        return new OutfitItemContext(targetItem, otherProducts);
+        return outfitItemRepository.findByOutfitId(outfitId);
     }
 
     public List<Product> findProductsForTryon(UUID outfitId) {
@@ -119,8 +117,5 @@ public class OutfitItemQueryService {
     public Outfit getById(UUID outfitId) {
         return outfitRepository.findById(outfitId)
                 .orElseThrow(() -> new ResourceNotFoundException("Outfit not found: " + outfitId));
-    }
-
-    public record OutfitItemContext(OutfitItem targetItem, List<Product> otherProducts) {
     }
 }

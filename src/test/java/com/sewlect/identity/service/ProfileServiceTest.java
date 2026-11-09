@@ -71,11 +71,9 @@ class ProfileServiceTest {
 
         StyleTag minimalist = StyleTag.builder().id(UUID.randomUUID()).name("minimalist").build();
         StyleTag streetwear = StyleTag.builder().id(UUID.randomUUID()).name("streetwear").build();
-        UserStylePreference pref1 = UserStylePreference.builder().styleTag(minimalist).build();
-        UserStylePreference pref2 = UserStylePreference.builder().styleTag(streetwear).build();
 
         when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
-        when(userStylePreferenceRepository.findAllByUserId(userId)).thenReturn(List.of(pref1, pref2));
+        when(userStylePreferenceRepository.findStyleTagsByUserId(userId)).thenReturn(List.of(minimalist, streetwear));
 
         UserProfileResponse response = profileService.getProfile(userId);
 
@@ -110,7 +108,7 @@ class ProfileServiceTest {
                 null, null, BigDecimal.valueOf(175), null, null, null, "EUR");
 
         when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
-        when(userStylePreferenceRepository.findAllByUserId(userId)).thenReturn(List.of());
+        when(userStylePreferenceRepository.findStyleTagsByUserId(userId)).thenReturn(List.of());
 
         UserProfileResponse response = profileService.updateProfile(userId, request);
 
@@ -144,7 +142,7 @@ class ProfileServiceTest {
                 new UserProfileUpdateRequest(null, null, null, null, null, null, null);
 
         when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
-        when(userStylePreferenceRepository.findAllByUserId(userId)).thenReturn(List.of());
+        when(userStylePreferenceRepository.findStyleTagsByUserId(userId)).thenReturn(List.of());
 
         UserProfileResponse response = profileService.updateProfile(userId, request);
 
@@ -221,7 +219,7 @@ class ProfileServiceTest {
     }
 
     @Test
-    void updateStylePreferences_deletesAreFlushedBeforeInserts() {
+    void updateStylePreferences_bulkDeleteRunsBeforeInserts() {
         UUID userId = UUID.randomUUID();
         UUID tagId = UUID.randomUUID();
         StyleTag tag = StyleTag.builder().id(tagId).name("minimalist").build();
@@ -233,7 +231,6 @@ class ProfileServiceTest {
 
         InOrder inOrder = inOrder(userStylePreferenceRepository);
         inOrder.verify(userStylePreferenceRepository).deleteAllByUserId(userId);
-        inOrder.verify(userStylePreferenceRepository).flush();
         inOrder.verify(userStylePreferenceRepository).saveAll(any());
     }
 
@@ -282,7 +279,7 @@ class ProfileServiceTest {
                 new UserProfileUpdateRequest(null, null, BigDecimal.valueOf(180), null, null, null, null);
 
         when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
-        when(userStylePreferenceRepository.findAllByUserId(userId)).thenReturn(List.of());
+        when(userStylePreferenceRepository.findStyleTagsByUserId(userId)).thenReturn(List.of());
 
         profileService.updateProfile(userId, request);
 
@@ -297,7 +294,7 @@ class ProfileServiceTest {
         UserProfile profile = UserProfile.builder().userId(userId).build();
 
         when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
-        when(userStylePreferenceRepository.findAllByUserId(userId)).thenReturn(List.of());
+        when(userStylePreferenceRepository.findStyleTagsByUserId(userId)).thenReturn(List.of());
 
         UserProfileResponse response = profileService.getProfile(userId);
 
@@ -312,5 +309,66 @@ class ProfileServiceTest {
         assertThatThrownBy(() -> profileService.getProfile(userId))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(userId.toString());
+    }
+
+    @Test
+    void updateProfile_sexNotYetSet_setsIt() {
+        UUID userId = UUID.randomUUID();
+        UserProfile profile = UserProfile.builder().userId(userId).build();
+        when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
+
+        UserProfileResponse response = profileService.updateProfile(userId, sexOnly(Sex.FEMALE));
+
+        assertThat(response.sex()).isEqualTo(Sex.FEMALE);
+        verify(userProfileRepository).save(profile);
+    }
+
+    @Test
+    void updateProfile_sexAlreadySetToADifferentValue_throwsBadRequestAndSavesNothing() {
+        UUID userId = UUID.randomUUID();
+        UserProfile profile = UserProfile.builder().userId(userId).sex(Sex.FEMALE)
+                .averageBudgetPerOutfit(BigDecimal.valueOf(150)).build();
+        when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest(
+                null, Sex.MALE, null, null, null, BigDecimal.valueOf(90), null);
+
+        assertThatThrownBy(() -> profileService.updateProfile(userId, request))
+                .isInstanceOf(BadRequestException.class);
+
+        assertThat(profile.getSex()).isEqualTo(Sex.FEMALE);
+        verify(userProfileRepository, never()).save(any());
+    }
+
+    @Test
+    void updateProfile_sexAlreadySetToTheSameValue_isANoOpThatStillAppliesOtherFields() {
+        UUID userId = UUID.randomUUID();
+        UserProfile profile = UserProfile.builder().userId(userId).sex(Sex.FEMALE)
+                .averageBudgetPerOutfit(BigDecimal.valueOf(150)).build();
+        when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest(
+                null, Sex.FEMALE, null, null, null, BigDecimal.valueOf(90), null);
+
+        UserProfileResponse response = profileService.updateProfile(userId, request);
+
+        assertThat(response.sex()).isEqualTo(Sex.FEMALE);
+        assertThat(response.averageBudgetPerOutfit()).isEqualByComparingTo(BigDecimal.valueOf(90));
+        verify(userProfileRepository).save(profile);
+    }
+
+    @Test
+    void updateProfile_sexOmitted_leavesTheStoredSexUnchanged() {
+        UUID userId = UUID.randomUUID();
+        UserProfile profile = UserProfile.builder().userId(userId).sex(Sex.MALE).build();
+        when(userProfileRepository.findById(userId)).thenReturn(Optional.of(profile));
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest(
+                null, null, null, null, null, BigDecimal.valueOf(120), null);
+
+        UserProfileResponse response = profileService.updateProfile(userId, request);
+
+        assertThat(response.sex()).isEqualTo(Sex.MALE);
+    }
+
+    private UserProfileUpdateRequest sexOnly(Sex sex) {
+        return new UserProfileUpdateRequest(null, sex, null, null, null, null, null);
     }
 }

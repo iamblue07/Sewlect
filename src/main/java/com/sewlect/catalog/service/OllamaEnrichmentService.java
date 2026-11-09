@@ -59,18 +59,14 @@ public class OllamaEnrichmentService implements EnrichmentService {
                     .call()
                     .entity(ProductEnrichmentResult.class);
         } catch (RuntimeException e) {
-            externalCallLogger.logCall(PROVIDER, OPERATION_ENRICH, elapsedMs(startedAt),
+            externalCallLogger.logCall(PROVIDER, OPERATION_ENRICH, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
             throw new ExternalServiceException(
                     "Ollama enrichment call failed for product " + product.getId() + ": " + e.getMessage());
         }
 
-        externalCallLogger.logCall(PROVIDER, OPERATION_ENRICH, elapsedMs(startedAt), ExternalCallOutcome.SUCCESS);
+        externalCallLogger.logCall(PROVIDER, OPERATION_ENRICH, ExternalCallLogger.elapsedMillisSince(startedAt), ExternalCallOutcome.SUCCESS);
         return result;
-    }
-
-    private long elapsedMs(long startedAtNanos) {
-        return (System.nanoTime() - startedAtNanos) / 1_000_000L;
     }
 
     private String buildPrompt(Product product, String allowedStyleTags) {
@@ -96,22 +92,22 @@ public class OllamaEnrichmentService implements EnrichmentService {
             HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
 
             if (response.statusCode() != 200) {
-                externalCallLogger.logCall(PROVIDER_DATASET_CDN, OPERATION_DOWNLOAD_IMAGE, elapsedMs(startedAt),
+                externalCallLogger.logCall(PROVIDER_DATASET_CDN, OPERATION_DOWNLOAD_IMAGE, ExternalCallLogger.elapsedMillisSince(startedAt),
                         ExternalCallOutcome.PERMANENT_FAILURE);
                 throw new ExternalServiceException(
                         "Failed to download product image, HTTP " + response.statusCode() + ": " + imageUrl);
             }
 
-            externalCallLogger.logCall(PROVIDER_DATASET_CDN, OPERATION_DOWNLOAD_IMAGE, elapsedMs(startedAt),
+            externalCallLogger.logCall(PROVIDER_DATASET_CDN, OPERATION_DOWNLOAD_IMAGE, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.SUCCESS);
             return response.body();
         } catch (IOException e) {
-            externalCallLogger.logCall(PROVIDER_DATASET_CDN, OPERATION_DOWNLOAD_IMAGE, elapsedMs(startedAt),
+            externalCallLogger.logCall(PROVIDER_DATASET_CDN, OPERATION_DOWNLOAD_IMAGE, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.RETRYABLE_FAILURE);
             throw new ExternalServiceException("Failed to download product image " + imageUrl + ": " + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            externalCallLogger.logCall(PROVIDER_DATASET_CDN, OPERATION_DOWNLOAD_IMAGE, elapsedMs(startedAt),
+            externalCallLogger.logCall(PROVIDER_DATASET_CDN, OPERATION_DOWNLOAD_IMAGE, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
             throw new ExternalServiceException("Interrupted while downloading product image: " + imageUrl);
         }

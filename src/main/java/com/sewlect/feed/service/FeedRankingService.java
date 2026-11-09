@@ -12,8 +12,10 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -31,10 +33,31 @@ public class FeedRankingService {
     private final OutfitGenerationProperties generationProperties;
     private final FeedRankingProperties rankingProperties;
 
-    public BigDecimal rankScore(UserProfile profile, Outfit outfit, Set<UUID> preferredStyleTagIds) {
-        BigDecimal styleOverlap = styleOverlap(preferredStyleTagIds, outfit);
-        BigDecimal budgetFit = budgetFit(profile, outfit);
+    public Map<UUID, BigDecimal> rankScores(UserProfile profile, List<Outfit> outfits, Set<UUID> preferredStyleTagIds) {
+        if (outfits.isEmpty()) {
+            return Map.of();
+        }
 
+        List<UUID> outfitIds = outfits.stream().map(Outfit::getId).toList();
+        Map<UUID, Set<UUID>> styleTagIdsByOutfitId = preferredStyleTagIds.isEmpty()
+                ? Map.of()
+                : findStyleTagIdsByOutfitId(outfitIds);
+        Map<UUID, BigDecimal> totalPriceByOutfitId = profile.getAverageBudgetPerOutfit() == null
+                ? Map.of()
+                : outfitItemQueryService.sumBasePriceForOutfits(outfitIds);
+
+        Map<UUID, BigDecimal> rankScores = new HashMap<>();
+        for (Outfit outfit : outfits) {
+            BigDecimal styleOverlap = styleOverlap(
+                    preferredStyleTagIds, styleTagIdsByOutfitId.getOrDefault(outfit.getId(), Set.of()));
+            BigDecimal budgetFit = budgetFit(
+                    profile.getAverageBudgetPerOutfit(), totalPriceByOutfitId.get(outfit.getId()));
+            rankScores.put(outfit.getId(), rankScore(outfit, styleOverlap, budgetFit));
+        }
+        return rankScores;
+    }
+
+    private BigDecimal rankScore(Outfit outfit, BigDecimal styleOverlap, BigDecimal budgetFit) {
         BigDecimal personalization = rankingProperties.styleWeight().multiply(styleOverlap)
                 .add(rankingProperties.budgetWeight().multiply(budgetFit));
 
@@ -46,18 +69,24 @@ public class FeedRankingService {
         return outfit.getCompatibilityScore().multiply(multiplier).setScale(4, RoundingMode.HALF_UP);
     }
 
-    public BigDecimal totalPrice(Outfit outfit) {
-        return outfitItemQueryService.sumBasePrice(outfit.getId());
+    private Map<UUID, Set<UUID>> findStyleTagIdsByOutfitId(List<UUID> outfitIds) {
+        Map<UUID, List<UUID>> productIdsByOutfitId = outfitItemQueryService.findProductIdsForOutfits(outfitIds);
+        List<UUID> productIds = productIdsByOutfitId.values().stream().flatMap(List::stream).distinct().toList();
+        Map<UUID, Set<UUID>> styleTagIdsByProductId = productStyleTagQueryService.findStyleTagIdsForProducts(productIds);
+
+        Map<UUID, Set<UUID>> styleTagIdsByOutfitId = new HashMap<>();
+        productIdsByOutfitId.forEach((outfitId, outfitProductIds) -> {
+            Set<UUID> outfitTagIds = new HashSet<>();
+            for (UUID productId : outfitProductIds) {
+                outfitTagIds.addAll(styleTagIdsByProductId.getOrDefault(productId, Set.of()));
+            }
+            styleTagIdsByOutfitId.put(outfitId, outfitTagIds);
+        });
+        return styleTagIdsByOutfitId;
     }
 
-    private BigDecimal styleOverlap(Set<UUID> preferredStyleTagIds, Outfit outfit) {
-        if (preferredStyleTagIds.isEmpty()) {
-            return NEUTRAL_SCORE;
-        }
-
-        List<UUID> outfitProductIds = outfitItemQueryService.findProductIds(outfit.getId());
-        Set<UUID> outfitTagIds = Set.copyOf(productStyleTagQueryService.findStyleTagIdsByProductIds(outfitProductIds));
-        if (outfitTagIds.isEmpty()) {
+    private BigDecimal styleOverlap(Set<UUID> preferredStyleTagIds, Set<UUID> outfitTagIds) {
+        if (preferredStyleTagIds.isEmpty() || outfitTagIds.isEmpty()) {
             return NEUTRAL_SCORE;
         }
 
@@ -71,13 +100,11 @@ public class FeedRankingService {
                 .divide(BigDecimal.valueOf(union.size()), INTERNAL_SCALE, RoundingMode.HALF_UP);
     }
 
-    private BigDecimal budgetFit(UserProfile profile, Outfit outfit) {
-        BigDecimal budget = profile.getAverageBudgetPerOutfit();
+    private BigDecimal budgetFit(BigDecimal budget, BigDecimal totalPrice) {
         if (budget == null) {
             return NEUTRAL_SCORE;
         }
 
-        BigDecimal totalPrice = totalPrice(outfit);
         if (totalPrice.compareTo(budget) <= 0) {
             return BigDecimal.ONE;
         }

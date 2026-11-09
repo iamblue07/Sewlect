@@ -1,5 +1,6 @@
 package com.sewlect.outfit.controller;
 
+import com.sewlect.outfit.domain.OutfitEngagement;
 import com.sewlect.outfit.domain.CompatibilityScoreBreakdown;
 import com.sewlect.outfit.dto.OutfitResponse;
 import com.sewlect.outfit.entity.Outfit;
@@ -20,6 +21,8 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -60,10 +63,10 @@ class OutfitControllerSecurityTest {
         OutfitResponse mockResponse = new OutfitResponse(outfitId,
                 new CompatibilityScoreBreakdown(new BigDecimal("0.9"), new BigDecimal("0.8"),
                         new BigDecimal("0.85"), new BigDecimal("0.7"), new BigDecimal("0.82")),
-                new BigDecimal("129.99"), List.of());
+                new BigDecimal("129.99"), List.of(), OutfitEngagement.none());
 
         when(outfitItemQueryService.getById(outfitId)).thenReturn(outfit);
-        when(outfitResponseAssembler.toResponse(outfit)).thenReturn(mockResponse);
+        when(outfitResponseAssembler.toResponse(eq(outfit), any())).thenReturn(mockResponse);
 
         mockMvc.perform(get("/api/v1/outfits/{outfitId}", outfitId)
                         .header(HttpHeaders.AUTHORIZATION,

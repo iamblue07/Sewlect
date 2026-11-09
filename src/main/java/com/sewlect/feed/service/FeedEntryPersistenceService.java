@@ -36,6 +36,11 @@ public class FeedEntryPersistenceService {
     }
 
     @Transactional
+    public int deleteUnseen(UUID userId) {
+        return feedEntryRepository.deleteByUserIdAndShownAtIsNull(userId);
+    }
+
+    @Transactional
     public void markShown(List<UUID> ids, LocalDateTime shownAt) {
         feedEntryRepository.markShown(ids, shownAt);
     }

@@ -11,6 +11,7 @@ public record OutfitItemView(
         String productDisplayName,
         String imageUrl,
         BigDecimal basePrice,
-        GarmentRole slot
+        GarmentRole slot,
+        boolean removable
 ) {
 }

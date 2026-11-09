@@ -1,8 +1,6 @@
 package com.sewlect.common.security.filter;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.sewlect.common.exception.dto.ErrorResponse;
-import com.sewlect.common.exception.support.ErrorResponseFactory;
 import com.sewlect.common.ratelimit.RateLimiter;
 import com.sewlect.common.security.properties.AuthRateLimitProperties;
 import jakarta.servlet.FilterChain;
@@ -12,12 +10,12 @@ import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.json.JsonMapper;
+import com.sewlect.common.security.support.RateLimitRejectionWriter;
+import com.sewlect.common.security.support.RateLimitRejectionWriter;
 import com.sewlect.common.security.support.RateLimitSubjectHasher;
 
 import java.io.ByteArrayInputStream;
@@ -42,18 +40,18 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
     private final RateLimiter rateLimiter;
     private final RateLimitSubjectHasher subjectHasher;
     private final AuthRateLimitProperties properties;
-    private final ErrorResponseFactory errorResponseFactory;
+    private final RateLimitRejectionWriter rejectionWriter;
     private final JsonMapper jsonMapper;
 
     public AuthRateLimitFilter(RateLimiter rateLimiter,
                                RateLimitSubjectHasher subjectHasher,
                                AuthRateLimitProperties properties,
-                               ErrorResponseFactory errorResponseFactory,
+                               RateLimitRejectionWriter rejectionWriter,
                                JsonMapper jsonMapper) {
         this.rateLimiter = rateLimiter;
         this.subjectHasher = subjectHasher;
         this.properties = properties;
-        this.errorResponseFactory = errorResponseFactory;
+        this.rejectionWriter = rejectionWriter;
         this.jsonMapper = jsonMapper;
     }
 
@@ -110,12 +108,7 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
     }
 
     private void reject(HttpServletRequest request, HttpServletResponse response) throws IOException {
-        ErrorResponse body = errorResponseFactory.build(
-                HttpStatus.TOO_MANY_REQUESTS, REJECTION_MESSAGE, request.getRequestURI());
-
-        response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.getWriter().write(jsonMapper.writeValueAsString(body));
+        rejectionWriter.write(request, response, REJECTION_MESSAGE);
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

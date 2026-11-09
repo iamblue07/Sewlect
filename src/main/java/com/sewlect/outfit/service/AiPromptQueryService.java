@@ -1,7 +1,6 @@
 package com.sewlect.outfit.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sewlect.common.ai.properties.DeepInfraProperties;
 import com.sewlect.common.exception.ExternalServiceException;
 import com.sewlect.identity.service.UserReferenceQueryService;
 import com.sewlect.outfit.entity.AiPromptQuery;
@@ -12,7 +11,11 @@ import com.sewlect.outfit.repository.AiPromptQueryRepository;
 import com.sewlect.outfit.repository.OutfitRepository;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,8 +27,10 @@ public class AiPromptQueryService {
     private final AiPromptQueryOutfitRepository aiPromptQueryOutfitRepository;
     private final OutfitRepository outfitRepository;
     private final UserReferenceQueryService userReferenceQueryService;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
+    private final DeepInfraProperties deepInfraProperties;
 
+    @Transactional
     public AiPromptQuery logSuccess(UUID userId, String rawPrompt, Object query, boolean matchProfile,
                                     List<UUID> resultingOutfitIds) {
         AiPromptQuery aiPromptQuery = AiPromptQuery.builder()
@@ -34,17 +39,19 @@ public class AiPromptQueryService {
                 .structuredQuery(writeAsJson(query))
                 .matchProfile(matchProfile)
                 .status(AiPromptQueryStatus.SUCCESS)
+                .model(deepInfraProperties.chatModel())
                 .build();
         aiPromptQueryRepository.save(aiPromptQuery);
 
+        List<AiPromptQueryOutfit> rankedOutfits = new ArrayList<>(resultingOutfitIds.size());
         for (int rank = 0; rank < resultingOutfitIds.size(); rank++) {
-            AiPromptQueryOutfit aiPromptQueryOutfit = AiPromptQueryOutfit.builder()
+            rankedOutfits.add(AiPromptQueryOutfit.builder()
                     .aiPromptQuery(aiPromptQuery)
                     .outfit(outfitRepository.getReferenceById(resultingOutfitIds.get(rank)))
                     .rank(rank)
-                    .build();
-            aiPromptQueryOutfitRepository.save(aiPromptQueryOutfit);
+                    .build());
         }
+        aiPromptQueryOutfitRepository.saveAll(rankedOutfits);
 
         return aiPromptQuery;
     }
@@ -54,6 +61,7 @@ public class AiPromptQueryService {
                 .user(userReferenceQueryService.getReference(userId))
                 .rawPrompt(rawPrompt)
                 .status(AiPromptQueryStatus.FAILED)
+                .model(deepInfraProperties.chatModel())
                 .errorMessage(errorMessage)
                 .build();
         return aiPromptQueryRepository.save(aiPromptQuery);
@@ -61,8 +69,8 @@ public class AiPromptQueryService {
 
     private String writeAsJson(Object query) {
         try {
-            return objectMapper.writeValueAsString(query);
-        } catch (JsonProcessingException e) {
+            return jsonMapper.writeValueAsString(query);
+        } catch (JacksonException e) {
             throw new ExternalServiceException("Failed to serialize structured prompt query: " + e.getMessage());
         }
     }

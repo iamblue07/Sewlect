@@ -46,4 +46,7 @@ public class AiPromptQuery extends AuditableEntity {
     private AiPromptQueryStatus status;
 
     private String errorMessage;
+
+    @Column(nullable = false)
+    private String model;
 }

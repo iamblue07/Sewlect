@@ -3,6 +3,7 @@ package com.sewlect.common.security.filter;
 import com.sewlect.common.exception.support.ErrorResponseFactory;
 import com.sewlect.common.ratelimit.RateLimiter;
 import com.sewlect.common.security.properties.AuthRateLimitProperties;
+import com.sewlect.common.security.support.RateLimitRejectionWriter;
 import com.sewlect.common.security.support.RateLimitSubjectHasher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,8 +50,9 @@ class AuthRateLimitFilterTest {
     void setUp() {
         ErrorResponseFactory errorResponseFactory = new ErrorResponseFactory(
                 Clock.fixed(Instant.parse("2026-01-01T12:00:00Z"), ZoneOffset.UTC));
+        JsonMapper jsonMapper = JsonMapper.builder().build();
         filter = new AuthRateLimitFilter(
-                rateLimiter, HASHER, PROPERTIES, errorResponseFactory, JsonMapper.builder().build());
+                rateLimiter, HASHER, PROPERTIES, new RateLimitRejectionWriter(errorResponseFactory, jsonMapper), jsonMapper);
     }
 
     @Test

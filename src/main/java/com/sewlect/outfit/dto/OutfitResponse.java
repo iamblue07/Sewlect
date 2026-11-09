@@ -1,6 +1,7 @@
 package com.sewlect.outfit.dto;
 
 import com.sewlect.outfit.domain.CompatibilityScoreBreakdown;
+import com.sewlect.outfit.domain.OutfitEngagement;
 import com.sewlect.outfit.domain.OutfitItemView;
 
 import java.math.BigDecimal;
@@ -11,6 +12,7 @@ public record OutfitResponse(
         UUID outfitId,
         CompatibilityScoreBreakdown compatibilityBreakdown,
         BigDecimal totalPrice,
-        List<OutfitItemView> items
+        List<OutfitItemView> items,
+        OutfitEngagement engagement
 ) {
 }

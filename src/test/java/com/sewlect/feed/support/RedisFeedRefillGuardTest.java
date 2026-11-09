@@ -20,7 +20,7 @@ class RedisFeedRefillGuardTest extends AbstractRedisIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        guard = new RedisFeedRefillGuard(REDIS_TEMPLATE, new FeedProperties(20, 30, LONG_TTL_MS));
+        guard = new RedisFeedRefillGuard(REDIS_TEMPLATE, new FeedProperties(20, 30, LONG_TTL_MS, 20));
     }
 
     @Test
@@ -51,7 +51,7 @@ class RedisFeedRefillGuardTest extends AbstractRedisIntegrationTest {
     @Test
     void tryClaim_strandedClaimIsFreedOnceTheTtlExpires() {
         RedisFeedRefillGuard shortLivedGuard =
-                new RedisFeedRefillGuard(REDIS_TEMPLATE, new FeedProperties(20, 30, SHORT_TTL_MS));
+                new RedisFeedRefillGuard(REDIS_TEMPLATE, new FeedProperties(20, 30, SHORT_TTL_MS, 20));
         UUID userId = UUID.randomUUID();
 
         assertThat(shortLivedGuard.tryClaim(userId)).isTrue();

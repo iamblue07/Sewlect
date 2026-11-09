@@ -3,6 +3,10 @@ package com.sewlect.common.taxonomy.support;
 import com.sewlect.common.taxonomy.enums.GarmentRole;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -100,6 +104,20 @@ public class GarmentRoleResolver {
             Map.entry("Wallets", GarmentRole.ACCESSORY),
             Map.entry("Wristbands", GarmentRole.ACCESSORY)
     );
+
+    private static final Map<GarmentRole, List<String>> ARTICLE_TYPES_BY_ROLE = groupArticleTypesByRole();
+
+    public Map<GarmentRole, List<String>> articleTypesByRole() {
+        return ARTICLE_TYPES_BY_ROLE;
+    }
+
+    private static Map<GarmentRole, List<String>> groupArticleTypesByRole() {
+        Map<GarmentRole, List<String>> grouped = new EnumMap<>(GarmentRole.class);
+        ARTICLE_TYPE_TO_ROLE.forEach((articleType, role) ->
+                grouped.computeIfAbsent(role, ignored -> new ArrayList<>()).add(articleType));
+        grouped.replaceAll((role, articleTypes) -> articleTypes.stream().sorted().toList());
+        return Collections.unmodifiableMap(grouped);
+    }
 
     public Optional<GarmentRole> resolve(String articleType) {
         if (articleType == null) {

@@ -3,6 +3,7 @@ package com.sewlect.outfit.service;
 import com.sewlect.catalog.entity.Product;
 import com.sewlect.catalog.service.ProductSearchService;
 import com.sewlect.catalog.service.ProductStyleTagQueryService;
+import com.sewlect.common.ai.util.EmbeddingVectorCentroid;
 import com.sewlect.common.taxonomy.enums.GarmentRole;
 import com.sewlect.identity.entity.UserProfile;
 import com.sewlect.identity.service.UserStylePreferenceQueryService;
@@ -17,9 +18,6 @@ import com.sewlect.outfit.support.OutfitItemSetHasher;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.data.domain.Limit;
-import org.springframework.data.domain.SearchResult;
-import org.springframework.data.domain.SearchResults;
 import org.springframework.data.domain.Vector;
 import org.springframework.stereotype.Service;
 
@@ -54,7 +52,7 @@ public class OutfitCandidateGenerator {
     private final ProductSearchService productSearchService;
     private final ProductStyleTagQueryService productStyleTagQueryService;
     private final UserStylePreferenceQueryService userStylePreferenceQueryService;
-    private final OutfitPersistenceService outfitPersistenceService;
+    private final OutfitBatchPersistenceService outfitBatchPersistenceService;
     private final OutfitCompatibilityScorer compatibilityScorer;
     private final OutfitGenerationProperties properties;
 
@@ -77,19 +75,19 @@ public class OutfitCandidateGenerator {
         GenerationContext context = new GenerationContext(
                 genders, priceCeiling, topPool, fullBodyPool, preferredProductIds, new HashMap<>());
 
-        List<Outfit> results = new ArrayList<>();
+        List<OutfitPersistenceService.PersistenceCandidate> candidates = new ArrayList<>();
         int attempts = 0;
-        while (results.size() < properties.batchSize() && attempts < properties.maxGenerationAttempts()) {
+        while (candidates.size() < properties.batchSize() && attempts < properties.maxGenerationAttempts()) {
             attempts++;
-            runCycle(context).ifPresent(results::add);
+            runCycle(context).ifPresent(candidates::add);
         }
 
-        if (attempts >= properties.maxGenerationAttempts() && results.size() < properties.batchSize()) {
+        if (attempts >= properties.maxGenerationAttempts() && candidates.size() < properties.batchSize()) {
             log.warn("Reached max generation attempts ({}) with {}/{} outfits collected for user {}",
-                    properties.maxGenerationAttempts(), results.size(), properties.batchSize(), profile.getUserId());
+                    properties.maxGenerationAttempts(), candidates.size(), properties.batchSize(), profile.getUserId());
         }
 
-        return results;
+        return outfitBatchPersistenceService.persistWithSingleRetry(candidates);
     }
 
     private Set<UUID> resolvePreferredProductIds(UUID userId) {
@@ -100,7 +98,7 @@ public class OutfitCandidateGenerator {
         return Set.copyOf(productStyleTagQueryService.findProductIdsByStyleTagIds(preferredStyleTagIds));
     }
 
-    private Optional<Outfit> runCycle(GenerationContext context) {
+    private Optional<OutfitPersistenceService.PersistenceCandidate> runCycle(GenerationContext context) {
         List<Product> availableTop = filterAvailable(context.topPool(), context.productUsageCounts());
         List<Product> availableFullBody = filterAvailable(context.fullBodyPool(), context.productUsageCounts());
 
@@ -138,17 +136,18 @@ public class OutfitCandidateGenerator {
 
         CompatibilityScoreBreakdown breakdown = compatibilityScorer.score(polished);
         String itemSetHash = itemSetHasher.hash(polished);
-        Outfit outfit = outfitPersistenceService.saveOrReuse(polished, breakdown, itemSetHash, OutfitSource.PROFILE_GENERATED);
         recordUsage(polished, context.productUsageCounts());
 
-        return Optional.of(outfit);
+        return Optional.of(new OutfitPersistenceService.PersistenceCandidate(
+                polished, breakdown, itemSetHash, OutfitSource.PROFILE_GENERATED));
     }
 
     private List<BeamPath> expandBeams(List<BeamPath> beams, GarmentRole role, String anchorOccasion,
                                        GenerationContext context, boolean optional) {
         List<BeamPath> nextGeneration = new ArrayList<>();
         for (BeamPath beam : beams) {
-            Vector reference = computeCentroid(beam.selected());
+            Vector reference = Vector.of(EmbeddingVectorCentroid.compute(
+                    beam.selected().stream().map(Product::getTextEmbedding).toList()));
             List<Product> candidates = fetchSlotCandidates(
                     role, context.genders(), context.priceCeiling(), reference, anchorOccasion);
             candidates = filterAvailable(candidates, context.productUsageCounts());
@@ -211,37 +210,15 @@ public class OutfitCandidateGenerator {
 
     private List<Product> fetchSlotCandidates(GarmentRole role, Set<String> genders, BigDecimal priceCeiling,
                                               Vector referenceVector, String occasion) {
-        Limit limit = Limit.of(properties.topKPerSlot());
+        int limit = properties.topKPerSlot();
 
-        SearchResults<Product> withOccasion = productSearchService.findNearestByOccasion(
-                role, genders, priceCeiling, occasion, referenceVector, ProductSearchService.UNBOUNDED_COSINE_DISTANCE, limit);
-        List<Product> candidates = extractProducts(withOccasion);
+        List<Product> candidates = productSearchService.findNearestByOccasion(
+                role, genders, priceCeiling, occasion, referenceVector, limit);
         if (!candidates.isEmpty()) {
             return candidates;
         }
 
-        SearchResults<Product> withoutOccasion = productSearchService.findNearest(
-                role, genders, priceCeiling, referenceVector, ProductSearchService.UNBOUNDED_COSINE_DISTANCE, limit);
-        return extractProducts(withoutOccasion);
-    }
-
-    private List<Product> extractProducts(SearchResults<Product> results) {
-        return results.getContent().stream().map(SearchResult::getContent).toList();
-    }
-
-    private Vector computeCentroid(List<Product> selected) {
-        int dimensions = selected.get(0).getTextEmbedding().length;
-        float[] centroid = new float[dimensions];
-        for (Product product : selected) {
-            float[] embedding = product.getTextEmbedding();
-            for (int i = 0; i < dimensions; i++) {
-                centroid[i] += embedding[i];
-            }
-        }
-        for (int i = 0; i < dimensions; i++) {
-            centroid[i] /= selected.size();
-        }
-        return Vector.of(centroid);
+        return productSearchService.findNearest(role, genders, priceCeiling, referenceVector, limit);
     }
 
     private List<Product> polish(BeamPath winner) {

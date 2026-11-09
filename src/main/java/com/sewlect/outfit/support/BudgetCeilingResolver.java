@@ -21,19 +21,12 @@ public class BudgetCeilingResolver {
         return averageBudgetPerOutfit.multiply(BigDecimal.ONE.add(properties.budgetTolerance()));
     }
 
-    public BigDecimal resolveNullable(BigDecimal averageBudgetPerOutfit) {
+    public BigDecimal remainingForSlot(BigDecimal outfitTotal, BigDecimal outgoingPrice,
+                                       BigDecimal averageBudgetPerOutfit) {
         if (averageBudgetPerOutfit == null) {
-            return null;
+            return UNLIMITED_PRICE_CEILING;
         }
-        return averageBudgetPerOutfit.multiply(BigDecimal.ONE.add(properties.budgetTolerance()));
-    }
-
-    public boolean exceedsBudget(BigDecimal outfitTotal, BigDecimal outgoingPrice, BigDecimal incomingPrice,
-                                 BigDecimal ceiling) {
-        if (ceiling == null) {
-            return false;
-        }
-        BigDecimal projectedTotal = outfitTotal.subtract(outgoingPrice).add(incomingPrice);
-        return projectedTotal.compareTo(ceiling) > 0;
+        BigDecimal committedElsewhere = outfitTotal.subtract(outgoingPrice);
+        return resolve(averageBudgetPerOutfit).subtract(committedElsewhere).max(BigDecimal.ZERO);
     }
 }

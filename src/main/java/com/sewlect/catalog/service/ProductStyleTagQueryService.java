@@ -5,7 +5,11 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -18,7 +22,15 @@ public class ProductStyleTagQueryService {
         return productStyleTagRepository.findDistinctProductIdByStyleTagIdIn(styleTagIds);
     }
 
-    public List<UUID> findStyleTagIdsByProductIds(Collection<UUID> productIds) {
-        return productStyleTagRepository.findDistinctStyleTagIdByProductIdIn(productIds);
+    public Map<UUID, Set<UUID>> findStyleTagIdsForProducts(Collection<UUID> productIds) {
+        if (productIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Set<UUID>> styleTagIdsByProductId = new HashMap<>();
+        for (ProductStyleTagRepository.ProductStyleTagLink link
+                : productStyleTagRepository.findLinksByProductIdIn(productIds)) {
+            styleTagIdsByProductId.computeIfAbsent(link.getProductId(), id -> new HashSet<>()).add(link.getStyleTagId());
+        }
+        return styleTagIdsByProductId;
     }
 }

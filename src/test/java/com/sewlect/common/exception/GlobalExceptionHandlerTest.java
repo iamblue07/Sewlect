@@ -306,4 +306,16 @@ class GlobalExceptionHandlerTest {
     private void dummyValidationTarget(String param) {
         // Exists only to give MethodParameter a real Method + parameter index to reflect on.
     }
+
+    @Test
+    void handleAppException_contentPolicyViolation_returns422() {
+        when(request.getRequestURI()).thenReturn(REQUEST_URI);
+        ContentPolicyViolationException ex = new ContentPolicyViolationException("Blocked by the content safety check");
+
+        ResponseEntity<ErrorResponse> response = handler.handleAppException(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(response.getBody().status()).isEqualTo(422);
+        assertThat(response.getBody().message()).isEqualTo("Blocked by the content safety check");
+    }
 }

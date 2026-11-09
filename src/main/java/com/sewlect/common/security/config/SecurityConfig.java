@@ -1,11 +1,12 @@
 package com.sewlect.common.security.config;
 
-import com.sewlect.common.exception.support.ErrorResponseFactory;
 import com.sewlect.common.logging.filter.CorrelationIdFilter;
 import com.sewlect.common.ratelimit.RateLimiter;
 import com.sewlect.common.security.filter.AuthRateLimitFilter;
+import com.sewlect.common.security.filter.PublicApiRateLimitFilter;
 import com.sewlect.common.security.properties.AuthRateLimitProperties;
 import com.sewlect.common.security.properties.CorsProperties;
+import com.sewlect.common.security.properties.PublicApiRateLimitProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,6 +31,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import tools.jackson.databind.json.JsonMapper;
+import com.sewlect.common.security.support.RateLimitRejectionWriter;
 import com.sewlect.common.security.support.RateLimitSubjectHasher;
 
 import java.util.List;
@@ -37,7 +39,7 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
-@EnableConfigurationProperties({AuthRateLimitProperties.class, CorsProperties.class})
+@EnableConfigurationProperties({AuthRateLimitProperties.class, CorsProperties.class, PublicApiRateLimitProperties.class})
 public class SecurityConfig {
 
     private static final long HSTS_MAX_AGE_SECONDS = 31536000L;
@@ -47,6 +49,7 @@ public class SecurityConfig {
             "/api/v1/auth/register",
             "/api/v1/auth/login",
             "/api/v1/auth/refresh",
+            "/api/v1/public/**",
 
             //For Healthcheck
             "/actuator/health",
@@ -102,10 +105,13 @@ public class SecurityConfig {
                                                    RateLimiter rateLimiter,
                                                    RateLimitSubjectHasher rateLimitSubjectHasher,
                                                    AuthRateLimitProperties authRateLimitProperties,
-                                                   ErrorResponseFactory errorResponseFactory,
+                                                   PublicApiRateLimitProperties publicApiRateLimitProperties,
+                                                   RateLimitRejectionWriter rateLimitRejectionWriter,
                                                    JsonMapper jsonMapper) throws Exception {
         AuthRateLimitFilter authRateLimitFilter = new AuthRateLimitFilter(
-                rateLimiter, rateLimitSubjectHasher, authRateLimitProperties, errorResponseFactory, jsonMapper);
+                rateLimiter, rateLimitSubjectHasher, authRateLimitProperties, rateLimitRejectionWriter, jsonMapper);
+        PublicApiRateLimitFilter publicApiRateLimitFilter = new PublicApiRateLimitFilter(
+                rateLimiter, rateLimitSubjectHasher, publicApiRateLimitProperties, rateLimitRejectionWriter);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -119,6 +125,7 @@ public class SecurityConfig {
                                 .maxAgeInSeconds(HSTS_MAX_AGE_SECONDS))
                 )
                 .addFilterBefore(authRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(publicApiRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
                         .requestMatchers("/actuator/**").hasRole("ADMIN")

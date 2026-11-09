@@ -1,5 +1,6 @@
 package com.sewlect.support;
 
+import com.sewlect.common.security.support.RateLimitRejectionWriter;
 import com.sewlect.common.security.support.RateLimitSubjectHasher;
 import com.sewlect.common.exception.support.ErrorResponseFactory;
 import com.sewlect.common.ratelimit.InMemoryRateLimiter;
@@ -10,6 +11,7 @@ import com.sewlect.common.security.handler.RestAccessDeniedHandler;
 import com.sewlect.common.security.handler.RestAuthenticationEntryPoint;
 import com.sewlect.common.security.properties.AuthRateLimitProperties;
 import com.sewlect.common.security.properties.CorsProperties;
+import com.sewlect.common.security.properties.PublicApiRateLimitProperties;
 import com.sewlect.identity.service.AppUserDetailsService;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -20,6 +22,7 @@ import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import tools.jackson.databind.json.JsonMapper;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -70,6 +73,17 @@ public class WebSliceTestConfig {
     @Bean
     public RateLimitSubjectHasher rateLimitSubjectHasher(AuthRateLimitProperties authRateLimitProperties) {
         return new RateLimitSubjectHasher(authRateLimitProperties);
+    }
+
+    @Bean
+    public PublicApiRateLimitProperties publicApiRateLimitProperties() {
+        return new PublicApiRateLimitProperties(60, Duration.ofMinutes(1));
+    }
+
+    @Bean
+    public RateLimitRejectionWriter rateLimitRejectionWriter(ErrorResponseFactory errorResponseFactory,
+                                                             JsonMapper jsonMapper) {
+        return new RateLimitRejectionWriter(errorResponseFactory, jsonMapper);
     }
 
     @Bean

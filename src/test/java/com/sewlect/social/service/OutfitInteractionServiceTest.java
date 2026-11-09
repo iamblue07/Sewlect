@@ -8,6 +8,7 @@ import com.sewlect.outfit.domain.OutfitItemView;
 import com.sewlect.outfit.entity.Outfit;
 import com.sewlect.outfit.service.OutfitItemQueryService;
 import com.sewlect.outfit.support.OutfitResponseAssembler;
+import com.sewlect.outfit.support.OutfitViewAssembler;
 import com.sewlect.social.dto.InteractionStateResponse;
 import com.sewlect.social.dto.SavedOutfitsResponse;
 import com.sewlect.social.entity.UserOutfitInteraction;
@@ -64,10 +65,12 @@ class OutfitInteractionServiceTest {
 
     @BeforeEach
     void setUp() {
-        outfitResponseAssembler = new OutfitResponseAssembler(outfitItemQueryService, outfitViewCache);
+        OutfitEngagementService outfitEngagementService = new OutfitEngagementService(userOutfitInteractionRepository);
+        outfitResponseAssembler = new OutfitResponseAssembler(
+                new OutfitViewAssembler(outfitItemQueryService, outfitViewCache), outfitEngagementService);
         service = new OutfitInteractionService(
                 userOutfitInteractionRepository, outfitItemQueryService, outfitResponseAssembler,
-                userReferenceQueryService);
+                userReferenceQueryService, outfitEngagementService);
     }
 
     // ---------- activate ----------
@@ -486,7 +489,7 @@ class OutfitInteractionServiceTest {
         Map<UUID, BigDecimal> totals = new java.util.HashMap<>();
         for (UUID outfitId : outfitIds) {
             views.put(outfitId, List.of(new OutfitItemView(UUID.randomUUID(), UUID.randomUUID(),
-                    "Product", "https://example.com/p.jpg", new BigDecimal("10.00"), GarmentRole.TOP)));
+                    "Product", "https://example.com/p.jpg", new BigDecimal("10.00"), GarmentRole.TOP, false)));
             totals.put(outfitId, new BigDecimal("10.00"));
         }
         when(outfitItemQueryService.findItemViewsForOutfits(outfitIds)).thenReturn(views);

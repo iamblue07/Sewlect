@@ -9,6 +9,7 @@ import com.sewlect.common.taxonomy.entity.StyleTag;
 import com.sewlect.identity.entity.User;
 import com.sewlect.identity.entity.UserProfile;
 import com.sewlect.identity.entity.UserStylePreference;
+import com.sewlect.identity.enums.Sex;
 import com.sewlect.identity.repository.*;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -42,7 +43,7 @@ public class ProfileService {
             profile.setBirthDate(request.birthDate());
         }
         if (request.sex() != null) {
-            profile.setSex(request.sex());
+            applySex(profile, request.sex());
         }
         if (request.heightCm() != null) {
             profile.setHeightCm(request.heightCm());
@@ -78,7 +79,6 @@ public class ProfileService {
         }
 
         userStylePreferenceRepository.deleteAllByUserId(userId);
-        userStylePreferenceRepository.flush();
 
         User userRef = userRepository.getReferenceById(userId);
         List<UserStylePreference> preferences = foundTags.stream()
@@ -98,6 +98,16 @@ public class ProfileService {
                 .build();
     }
 
+    private void applySex(UserProfile profile, Sex requested) {
+        if (profile.getSex() == null) {
+            profile.setSex(requested);
+            return;
+        }
+        if (profile.getSex() != requested) {
+            throw new BadRequestException("Sex can only be set once and cannot be changed afterwards");
+        }
+    }
+
     private UserProfile loadProfile(UUID userId) {
         return userProfileRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException(
@@ -105,8 +115,8 @@ public class ProfileService {
     }
 
     private List<StyleTagResponse> currentStyleTags(UUID userId) {
-        return userStylePreferenceRepository.findAllByUserId(userId).stream()
-                .map(pref -> new StyleTagResponse(pref.getStyleTag().getId(), pref.getStyleTag().getName()))
+        return userStylePreferenceRepository.findStyleTagsByUserId(userId).stream()
+                .map(tag -> new StyleTagResponse(tag.getId(), tag.getName()))
                 .toList();
     }
 

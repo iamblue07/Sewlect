@@ -4,12 +4,9 @@ import com.sewlect.catalog.entity.Product;
 import com.sewlect.common.taxonomy.enums.GarmentRole;
 import jakarta.transaction.Transactional;
 import org.springframework.data.domain.Limit;
-import org.springframework.data.domain.Score;
-import org.springframework.data.domain.SearchResults;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.domain.Vector;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
@@ -20,8 +17,16 @@ import java.util.UUID;
 
 public interface ProductRepository extends JpaRepository<Product, UUID> {
 
+    String HALFVEC_TYPE = "halfvec(" + Product.TEXT_EMBEDDING_DIMENSIONS + ")";
+
+    String NEAREST_TO_REFERENCE = "ORDER BY CAST(p.text_embedding AS " + HALFVEC_TYPE + ")"
+            + " <=> CAST(:reference AS " + HALFVEC_TYPE + ") LIMIT :limit";
+
     @Query("SELECT p.externalId FROM Product p")
     List<String> findAllExternalIds();
+
+    @Query("SELECT DISTINCT p.occasion FROM Product p WHERE p.occasion IS NOT NULL ORDER BY p.occasion")
+    List<String> findDistinctOccasions();
 
     Optional<Product> findFirstByDescriptionIsNullOrderByCreatedAtAsc();
 
@@ -48,16 +53,49 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
             GarmentRole garmentRole, Collection<String> genders, BigDecimal priceCeiling
     );
 
-    List<Product> findByArticleTypeAndGenderInAndIdNotAndPrimaryColorIsNotNullAndTextEmbeddingIsNotNull(
-            String articleType, Collection<String> genders, UUID excludeId, Limit limit
-    );
+    @Query(value = """
+            SELECT p.* FROM products p
+            WHERE p.garment_role = :role
+              AND p.gender IN (:genders)
+              AND p.base_price <= :priceCeiling
+              AND p.text_embedding IS NOT NULL
+              AND p.primary_color IS NOT NULL
+            """ + NEAREST_TO_REFERENCE, nativeQuery = true)
+    List<Product> findNearestByRole(@Param("role") String role,
+                                    @Param("genders") Collection<String> genders,
+                                    @Param("priceCeiling") BigDecimal priceCeiling,
+                                    @Param("reference") String reference,
+                                    @Param("limit") int limit);
 
-    SearchResults<Product> searchByGarmentRoleAndGenderInAndBasePriceLessThanEqualAndTextEmbeddingNear(
-            GarmentRole garmentRole, Collection<String> genders, BigDecimal priceCeiling,
-            Vector referenceEmbedding, Score score, Limit limit);
+    @Query(value = """
+            SELECT p.* FROM products p
+            WHERE p.garment_role = :role
+              AND p.gender IN (:genders)
+              AND p.base_price <= :priceCeiling
+              AND p.occasion = :occasion
+              AND p.text_embedding IS NOT NULL
+              AND p.primary_color IS NOT NULL
+            """ + NEAREST_TO_REFERENCE, nativeQuery = true)
+    List<Product> findNearestByRoleAndOccasion(@Param("role") String role,
+                                               @Param("genders") Collection<String> genders,
+                                               @Param("priceCeiling") BigDecimal priceCeiling,
+                                               @Param("occasion") String occasion,
+                                               @Param("reference") String reference,
+                                               @Param("limit") int limit);
 
-    SearchResults<Product> searchByGarmentRoleAndGenderInAndBasePriceLessThanEqualAndOccasionAndTextEmbeddingNear(
-            GarmentRole garmentRole, Collection<String> genders, BigDecimal priceCeiling, String occasion,
-            Vector referenceEmbedding, Score score, Limit limit);
-
+    @Query(value = """
+            SELECT p.* FROM products p
+            WHERE p.article_type = :articleType
+              AND p.gender IN (:genders)
+              AND p.base_price <= :priceCeiling
+              AND p.id <> :excludedProductId
+              AND p.text_embedding IS NOT NULL
+              AND p.primary_color IS NOT NULL
+            """ + NEAREST_TO_REFERENCE, nativeQuery = true)
+    List<Product> findNearestOfArticleType(@Param("articleType") String articleType,
+                                           @Param("genders") Collection<String> genders,
+                                           @Param("priceCeiling") BigDecimal priceCeiling,
+                                           @Param("excludedProductId") UUID excludedProductId,
+                                           @Param("reference") String reference,
+                                           @Param("limit") int limit);
 }
