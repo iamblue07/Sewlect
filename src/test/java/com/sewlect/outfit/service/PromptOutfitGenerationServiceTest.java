@@ -145,7 +145,7 @@ class PromptOutfitGenerationServiceTest {
         UserProfile profile = profileWith(Sex.OTHER, new BigDecimal("200"));
         when(userProfileQueryService.getById(userId)).thenReturn(profile);
         when(promptExtractionService.extract("nothing matches")).thenReturn(singleTopBottomFootwearQuery());
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
         when(productSearchService.findNearest(any(), any(), any(), any(), anyInt())).thenReturn(emptyResults());
 
         assertThatThrownBy(() -> service.generate(userId, "nothing matches", true))
@@ -163,7 +163,7 @@ class PromptOutfitGenerationServiceTest {
 
         StructuredPromptQuery query = singleTopBottomFootwearQuery();
         when(promptExtractionService.extract("smart casual")).thenReturn(query);
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
 
         Product top = productWithRole(GarmentRole.TOP);
         Product bottom = productWithRole(GarmentRole.BOTTOM);
@@ -213,7 +213,7 @@ class PromptOutfitGenerationServiceTest {
         when(userProfileQueryService.getById(userId)).thenReturn(profile);
         StructuredPromptQuery query = singleTopBottomFootwearQuery();
         when(promptExtractionService.extract(anyString())).thenReturn(query);
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
         stubAllSlotCandidates();
         when(outfitCompatibilityScorer.score(any())).thenReturn(breakdown("0.7"));
 
@@ -240,7 +240,7 @@ class PromptOutfitGenerationServiceTest {
         UserProfile profile = profileWith(Sex.OTHER, new BigDecimal("300"));
         when(userProfileQueryService.getById(userId)).thenReturn(profile);
         when(promptExtractionService.extract(anyString())).thenReturn(singleTopBottomFootwearQuery());
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
         stubAllSlotCandidates();
         when(outfitCompatibilityScorer.score(any())).thenReturn(breakdown("0.7"));
 
@@ -263,7 +263,7 @@ class PromptOutfitGenerationServiceTest {
         UserProfile profile = profileWith(Sex.OTHER, new BigDecimal("100"));
         when(userProfileQueryService.getById(userId)).thenReturn(profile);
         when(promptExtractionService.extract(anyString())).thenReturn(singleTopBottomFootwearQuery());
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
         stubAllSlotCandidates();
         when(outfitCompatibilityScorer.score(any())).thenReturn(breakdown("0.7"));
         stubBatchPersistence();
@@ -290,7 +290,7 @@ class PromptOutfitGenerationServiceTest {
                 new SlotDescription(GarmentRole.FOOTWEAR, "heels")));
         StructuredPromptQuery query = new StructuredPromptQuery(List.of(topBottomBlueprint, fullBodyBlueprint));
         when(promptExtractionService.extract(anyString())).thenReturn(query);
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
 
         Product top = productWithRole(GarmentRole.TOP);
         Product bottom = productWithRole(GarmentRole.BOTTOM);
@@ -368,7 +368,7 @@ class PromptOutfitGenerationServiceTest {
                 aiPromptQueryService, budgetCeilingResolver, smallBatchProperties, diversityProperties);
 
         when(promptExtractionService.extract(anyString())).thenReturn(singleTopBottomFootwearQuery());
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
 
         Product topA = productWithRole(GarmentRole.TOP);
         Product topB = productWithRole(GarmentRole.TOP);
@@ -398,7 +398,7 @@ class PromptOutfitGenerationServiceTest {
         UserProfile profile = profileWith(Sex.OTHER, new BigDecimal("300"));
         when(userProfileQueryService.getById(userId)).thenReturn(profile);
         when(promptExtractionService.extract(anyString())).thenReturn(singleTopBottomFootwearQuery());
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
 
         Product topA = productWithRole(GarmentRole.TOP);
         Product topB = productWithRole(GarmentRole.TOP);
@@ -472,6 +472,13 @@ class PromptOutfitGenerationServiceTest {
         });
     }
 
+    private void stubEmbeddings() {
+        when(promptQueryEmbeddingService.embedAll(any())).thenAnswer(invocation ->
+                invocation.<List<String>>getArgument(0).stream()
+                        .map(description -> Vector.of(new float[]{1f, 0f, 0f}))
+                        .toList());
+    }
+
     private UserProfile profileWith(Sex sex, BigDecimal budget) {
         return UserProfile.builder().userId(userId).sex(sex).averageBudgetPerOutfit(budget).build();
     }
@@ -503,7 +510,7 @@ class PromptOutfitGenerationServiceTest {
     void execute_success_returnsTheSuccessRowsIdAndThePersistedOutfitsInRankOrder() {
         when(userProfileQueryService.getById(userId)).thenReturn(profileWith(Sex.OTHER, new BigDecimal("300")));
         when(promptExtractionService.extract(anyString())).thenReturn(singleTopBottomFootwearQuery());
-        when(promptQueryEmbeddingService.embed(any())).thenReturn(Vector.of(new float[]{1f, 0f, 0f}));
+        stubEmbeddings();
         stubAllSlotCandidates();
         when(outfitCompatibilityScorer.score(any())).thenReturn(breakdown("0.7"));
         Outfit persisted = Outfit.builder().id(UUID.randomUUID()).build();
@@ -526,7 +533,7 @@ class PromptOutfitGenerationServiceTest {
     void execute_unexpectedRuntimeFailure_isLoggedOnceAndReturnedAsAFailedOutcome() {
         when(userProfileQueryService.getById(userId)).thenReturn(profileWith(Sex.OTHER, new BigDecimal("300")));
         when(promptExtractionService.extract(anyString())).thenReturn(singleTopBottomFootwearQuery());
-        when(promptQueryEmbeddingService.embed(any())).thenThrow(new IllegalStateException("embedding model not found"));
+        when(promptQueryEmbeddingService.embedAll(any())).thenThrow(new IllegalStateException("embedding model not found"));
         UUID failureId = UUID.randomUUID();
         when(aiPromptQueryService.logFailure(userId, "summer wedding", "embedding model not found"))
                 .thenReturn(AiPromptQuery.builder().id(failureId).build());
@@ -546,7 +553,7 @@ class PromptOutfitGenerationServiceTest {
     void generate_unexpectedRuntimeFailure_isMappedToA502WithTheSameMessage() {
         when(userProfileQueryService.getById(userId)).thenReturn(profileWith(Sex.OTHER, new BigDecimal("300")));
         when(promptExtractionService.extract(anyString())).thenReturn(singleTopBottomFootwearQuery());
-        when(promptQueryEmbeddingService.embed(any())).thenThrow(new IllegalStateException("embedding model not found"));
+        when(promptQueryEmbeddingService.embedAll(any())).thenThrow(new IllegalStateException("embedding model not found"));
 
         assertThatThrownBy(() -> service.generate(userId, "summer wedding", true))
                 .isInstanceOf(ExternalServiceException.class)

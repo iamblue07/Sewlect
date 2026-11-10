@@ -1,6 +1,7 @@
 package com.sewlect.social.controller;
 
 import com.sewlect.common.openapi.annotation.StandardApiErrors;
+import com.sewlect.common.persistence.util.PageRequests;
 import com.sewlect.social.dto.InteractionStateResponse;
 import com.sewlect.social.dto.SavedOutfitsResponse;
 import com.sewlect.social.enums.InteractionType;
@@ -10,7 +11,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.AllArgsConstructor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -79,7 +79,7 @@ public class OutfitInteractionController {
                                                           @RequestParam(defaultValue = "0") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        Pageable pageable = PageRequest.of(Math.max(page, 0), clampSize(size));
+        Pageable pageable = PageRequests.of(page, clampSize(size));
         return ResponseEntity.ok(outfitInteractionService.listSaved(userId, pageable));
     }
 

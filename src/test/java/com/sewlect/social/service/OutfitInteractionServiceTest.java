@@ -231,7 +231,7 @@ class OutfitInteractionServiceTest {
 
         when(userOutfitInteractionRepository
                 .deleteByUserIdAndOutfitIdAndInteractionType(userId, outfitId, InteractionType.LIKE))
-                .thenReturn(1L);
+                .thenReturn(1);
 
         InteractionStateResponse response = service.deactivate(userId, outfitId, InteractionType.LIKE);
 
@@ -247,7 +247,7 @@ class OutfitInteractionServiceTest {
 
         when(userOutfitInteractionRepository
                 .deleteByUserIdAndOutfitIdAndInteractionType(userId, outfitId, InteractionType.SAVE))
-                .thenReturn(0L);
+                .thenReturn(0);
 
         assertThat(service.deactivate(userId, outfitId, InteractionType.SAVE).active()).isFalse();
     }
@@ -259,7 +259,7 @@ class OutfitInteractionServiceTest {
 
         when(userOutfitInteractionRepository
                 .deleteByUserIdAndOutfitIdAndInteractionType(userId, neverTouchedOutfitId, InteractionType.LIKE))
-                .thenReturn(0L);
+                .thenReturn(0);
 
         InteractionStateResponse response = service.deactivate(userId, neverTouchedOutfitId, InteractionType.LIKE);
 
@@ -275,7 +275,7 @@ class OutfitInteractionServiceTest {
 
         when(userOutfitInteractionRepository
                 .deleteByUserIdAndOutfitIdAndInteractionType(userId, outfitId, InteractionType.LIKE))
-                .thenReturn(1L);
+                .thenReturn(1);
 
         service.deactivate(userId, outfitId, InteractionType.LIKE);
 

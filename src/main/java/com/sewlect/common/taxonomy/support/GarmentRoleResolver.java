@@ -14,7 +14,6 @@ import java.util.Optional;
 public class GarmentRoleResolver {
 
     private static final Map<String, GarmentRole> ARTICLE_TYPE_TO_ROLE = Map.ofEntries(
-            // TOP
             Map.entry("Kurtas", GarmentRole.TOP),
             Map.entry("Kurtis", GarmentRole.TOP),
             Map.entry("Shirts", GarmentRole.TOP),
@@ -24,7 +23,6 @@ public class GarmentRoleResolver {
             Map.entry("Tshirts", GarmentRole.TOP),
             Map.entry("Tunics", GarmentRole.TOP),
 
-            // BOTTOM
             Map.entry("Capris", GarmentRole.BOTTOM),
             Map.entry("Churidar", GarmentRole.BOTTOM),
             Map.entry("Jeans", GarmentRole.BOTTOM),
@@ -39,14 +37,12 @@ public class GarmentRoleResolver {
             Map.entry("Track Pants", GarmentRole.BOTTOM),
             Map.entry("Trousers", GarmentRole.BOTTOM),
 
-            // FULL_BODY
             Map.entry("Dresses", GarmentRole.FULL_BODY),
             Map.entry("Jumpsuit", GarmentRole.FULL_BODY),
             Map.entry("Lehenga Choli", GarmentRole.FULL_BODY),
             Map.entry("Rompers", GarmentRole.FULL_BODY),
             Map.entry("Sarees", GarmentRole.FULL_BODY),
 
-            // FOOTWEAR
             Map.entry("Casual Shoes", GarmentRole.FOOTWEAR),
             Map.entry("Flats", GarmentRole.FOOTWEAR),
             Map.entry("Formal Shoes", GarmentRole.FOOTWEAR),
@@ -57,7 +53,6 @@ public class GarmentRoleResolver {
             Map.entry("Flip Flops", GarmentRole.FOOTWEAR),
             Map.entry("Booties", GarmentRole.FOOTWEAR),
 
-            // OUTERWEAR
             Map.entry("Blazers", GarmentRole.OUTERWEAR),
             Map.entry("Jackets", GarmentRole.OUTERWEAR),
             Map.entry("Nehru Jackets", GarmentRole.OUTERWEAR),
@@ -66,7 +61,6 @@ public class GarmentRoleResolver {
             Map.entry("Suits", GarmentRole.OUTERWEAR),
             Map.entry("Waistcoat", GarmentRole.OUTERWEAR),
 
-            // ACCESSORY
             Map.entry("Backpacks", GarmentRole.ACCESSORY),
             Map.entry("Bangle", GarmentRole.ACCESSORY),
             Map.entry("Belts", GarmentRole.ACCESSORY),

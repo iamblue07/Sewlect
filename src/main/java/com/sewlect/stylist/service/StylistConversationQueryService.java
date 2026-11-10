@@ -2,6 +2,7 @@ package com.sewlect.stylist.service;
 
 import com.sewlect.common.exception.ConflictException;
 import com.sewlect.common.exception.ResourceNotFoundException;
+import com.sewlect.common.persistence.util.PageRequests;
 import com.sewlect.outfit.domain.PromptQueryResult;
 import com.sewlect.outfit.service.PromptResultQueryService;
 import com.sewlect.stylist.dto.ConversationPageResponse;
@@ -18,7 +19,6 @@ import com.sewlect.stylist.repository.StylistSearchRepository;
 import com.sewlect.stylist.support.StylistResponseAssembler;
 import lombok.AllArgsConstructor;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -53,7 +53,7 @@ public class StylistConversationQueryService {
 
     public ConversationPageResponse list(UUID userId, int page, int size) {
         Page<StylistConversation> conversations = conversationRepository.findPageByUserId(
-                userId, PageRequest.of(Math.max(page, 0), clampSize(size)));
+                userId, PageRequests.of(page, clampSize(size)));
         return new ConversationPageResponse(
                 conversations.getContent().stream().map(responseAssembler::toSummary).toList(),
                 conversations.getNumber(), conversations.getSize(),

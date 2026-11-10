@@ -31,6 +31,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -41,6 +42,7 @@ import java.util.UUID;
 public class AuthService {
 
     private static final String PASSWORD_CHANGE_OPERATION_KEY = "password-change";
+    private static final int MAX_PASSWORD_BYTES = 72;
 
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
@@ -57,6 +59,7 @@ public class AuthService {
     @Transactional
     public AuthResponse register(RegisterRequest request) {
         String email = request.email().toLowerCase();
+        requireBcryptCompatible(request.password());
 
         if (userRepository.existsByEmail(email)) {
             throw new ConflictException("An account with this email already exists");
@@ -104,28 +107,28 @@ public class AuthService {
         return response;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = UnauthorizedException.class)
     public AuthResponse refresh(RefreshRequest request) {
         String tokenHash = jwtService.hashToken(request.refreshToken());
 
         RefreshToken storedToken = refreshTokenRepository.findByTokenHash(tokenHash)
                 .orElseThrow(() -> new UnauthorizedException("Invalid refresh token"));
 
+        User owner = storedToken.getUser();
         if (storedToken.getRevokedAt() != null) {
-            UUID userId = storedToken.getUser().getId();
-            securityEventLogger.refreshTokenReuseDetected(userId, revokeActiveTokens(userId));
-            throw new UnauthorizedException("Invalid refresh token");
+            throw reuseDetected(owner.getId());
         }
 
         if (storedToken.getExpiresAt().isBefore(LocalDateTime.now(clock))) {
             throw new UnauthorizedException("Invalid refresh token");
         }
 
-        storedToken.setRevokedAt(LocalDateTime.now(clock));
-        refreshTokenRepository.save(storedToken);
+        if (refreshTokenRepository.revokeIfActive(storedToken.getId(), LocalDateTime.now(clock)) == 0) {
+            throw reuseDetected(owner.getId());
+        }
 
-        AuthResponse response = issueTokens(storedToken.getUser());
-        securityEventLogger.refreshTokenRotated(storedToken.getUser().getId());
+        AuthResponse response = issueTokens(owner);
+        securityEventLogger.refreshTokenRotated(owner.getId());
         return response;
     }
 
@@ -159,17 +162,26 @@ public class AuthService {
         if (request.newPassword().equals(request.currentPassword())) {
             throw new BadRequestException("The new password must differ from the current one");
         }
+        requireBcryptCompatible(request.newPassword());
 
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userRepository.save(user);
 
-        int revokedTokenCount = revokeActiveTokens(userId);
-        securityEventLogger.passwordChanged(userId, revokedTokenCount);
+        int deletedTokenCount = refreshTokenRepository.deleteAllByUserId(userId);
+        securityEventLogger.passwordChanged(userId, deletedTokenCount);
         return issueTokens(user);
     }
 
-    private int revokeActiveTokens(UUID userId) {
-        return refreshTokenRepository.revokeAllActiveByUserId(userId, LocalDateTime.now(clock));
+    private UnauthorizedException reuseDetected(UUID userId) {
+        int revokedTokenCount = refreshTokenRepository.revokeAllActiveByUserId(userId, LocalDateTime.now(clock));
+        securityEventLogger.refreshTokenReuseDetected(userId, revokedTokenCount);
+        return new UnauthorizedException("Invalid refresh token");
+    }
+
+    private void requireBcryptCompatible(String password) {
+        if (password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) {
+            throw new BadRequestException("The password may be at most " + MAX_PASSWORD_BYTES + " bytes long");
+        }
     }
 
     private AuthResponse issueTokens(User user) {

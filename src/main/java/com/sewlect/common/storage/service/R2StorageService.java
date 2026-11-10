@@ -25,9 +25,6 @@ import java.net.URL;
 import java.time.Duration;
 import java.util.function.Supplier;
 
-/**
- * {@link StorageService} backed by Cloudflare R2, via its S3-compatible API.
- */
 @Service
 public class R2StorageService implements StorageService {
 
@@ -155,11 +152,6 @@ public class R2StorageService implements StorageService {
         }
     }
 
-    /**
-     * Runs an R2 call, retrying on transient failures with exponential backoff. Non-retryable
-     * failures (4xx responses) and exhausted attempts are rethrown for the caller's own
-     * catch block to log at ERROR and wrap in {@link ExternalServiceException}.
-     */
     private <T> T withRetry(String operation, String key, Supplier<T> action) {
         SdkException lastException;
         int attempt = 1;
@@ -194,7 +186,6 @@ public class R2StorageService implements StorageService {
         if (e instanceof S3Exception s3Exception) {
             return s3Exception.statusCode() >= 500;
         }
-        // No response at all — timeout, connection reset, DNS failure — worth retrying.
         return true;
     }
 }

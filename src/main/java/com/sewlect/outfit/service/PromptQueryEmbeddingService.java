@@ -10,6 +10,8 @@ import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.data.domain.Vector;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 @AllArgsConstructor
 public class PromptQueryEmbeddingService {
@@ -20,10 +22,14 @@ public class PromptQueryEmbeddingService {
     private final ExternalCallLogger externalCallLogger;
 
     public Vector embed(String text) {
+        return embedAll(List.of(text)).getFirst();
+    }
+
+    public List<Vector> embedAll(List<String> texts) {
         long startedAt = System.nanoTime();
-        float[] rawEmbedding;
+        List<float[]> rawEmbeddings;
         try {
-            rawEmbedding = openAiEmbeddingModel.embed(text);
+            rawEmbeddings = openAiEmbeddingModel.embed(texts);
         } catch (RuntimeException e) {
             externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EMBED, ExternalCallLogger.elapsedMillisSince(startedAt),
                     ExternalCallOutcome.PERMANENT_FAILURE);
@@ -31,6 +37,8 @@ public class PromptQueryEmbeddingService {
         }
 
         externalCallLogger.logCall(DeepInfraConfig.PROVIDER, OPERATION_EMBED, ExternalCallLogger.elapsedMillisSince(startedAt), ExternalCallOutcome.SUCCESS);
-        return Vector.of(EmbeddingVectorTruncator.truncateAndNormalize(rawEmbedding, Product.TEXT_EMBEDDING_DIMENSIONS));
+        return rawEmbeddings.stream()
+                .map(raw -> Vector.of(EmbeddingVectorTruncator.truncateAndNormalize(raw, Product.TEXT_EMBEDDING_DIMENSIONS)))
+                .toList();
     }
 }

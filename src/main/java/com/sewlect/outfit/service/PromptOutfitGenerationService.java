@@ -110,12 +110,13 @@ public class PromptOutfitGenerationService {
     private PromptQueryOutcome buildOutcome(UUID userId, String rawPrompt, List<OutfitBlueprint> blueprints,
                                             Set<String> genders, BigDecimal priceCeiling, Object loggedQuery,
                                             boolean matchProfile) {
+        Map<SlotDescription, Vector> slotEmbeddings = embedSlots(blueprints);
         List<BlueprintResult> pool = new ArrayList<>();
         for (OutfitBlueprint blueprint : blueprints) {
             if (pool.size() >= properties.generationPoolSize()) {
                 break;
             }
-            collectCombinationsFor(blueprint, genders, priceCeiling, pool);
+            collectCombinationsFor(blueprint, slotEmbeddings, genders, priceCeiling, pool);
         }
 
         if (pool.isEmpty()) {
@@ -179,11 +180,25 @@ public class PromptOutfitGenerationService {
         }
     }
 
-    private void collectCombinationsFor(OutfitBlueprint blueprint, Set<String> genders, BigDecimal priceCeiling,
-                                        List<BlueprintResult> pool) {
+    private Map<SlotDescription, Vector> embedSlots(List<OutfitBlueprint> blueprints) {
+        List<SlotDescription> slots = blueprints.stream()
+                .flatMap(blueprint -> blueprint.slots().stream())
+                .distinct()
+                .toList();
+        List<Vector> embeddings = promptQueryEmbeddingService.embedAll(
+                slots.stream().map(SlotDescription::description).toList());
+        Map<SlotDescription, Vector> embeddingsBySlot = new HashMap<>();
+        for (int i = 0; i < slots.size(); i++) {
+            embeddingsBySlot.put(slots.get(i), embeddings.get(i));
+        }
+        return embeddingsBySlot;
+    }
+
+    private void collectCombinationsFor(OutfitBlueprint blueprint, Map<SlotDescription, Vector> slotEmbeddings,
+                                        Set<String> genders, BigDecimal priceCeiling, List<BlueprintResult> pool) {
         List<List<Product>> candidatesBySlot = new ArrayList<>();
         for (SlotDescription slot : blueprint.slots()) {
-            List<Product> candidates = fetchSlotCandidates(slot, genders, priceCeiling);
+            List<Product> candidates = fetchSlotCandidates(slot, slotEmbeddings.get(slot), genders, priceCeiling);
             if (candidates.isEmpty()) {
                 return;
             }
@@ -199,8 +214,8 @@ public class PromptOutfitGenerationService {
         }
     }
 
-    private List<Product> fetchSlotCandidates(SlotDescription slot, Set<String> genders, BigDecimal priceCeiling) {
-        Vector referenceEmbedding = promptQueryEmbeddingService.embed(slot.description());
+    private List<Product> fetchSlotCandidates(SlotDescription slot, Vector referenceEmbedding, Set<String> genders,
+                                              BigDecimal priceCeiling) {
         return productSearchService.findNearest(
                 slot.role(), genders, priceCeiling, referenceEmbedding, properties.topKPerSlot());
     }

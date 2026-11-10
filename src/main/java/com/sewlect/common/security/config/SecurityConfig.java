@@ -45,16 +45,13 @@ public class SecurityConfig {
     private static final long HSTS_MAX_AGE_SECONDS = 31536000L;
 
     private static final String[] PUBLIC_ENDPOINTS = {
-            //For Authentication
             "/api/v1/auth/register",
             "/api/v1/auth/login",
             "/api/v1/auth/refresh",
             "/api/v1/public/**",
 
-            //For Healthcheck
             "/actuator/health",
 
-            //For Swagger
             "/v3/api-docs/**",
             "/v3/api-docs.yaml",
             "/swagger-ui/**",

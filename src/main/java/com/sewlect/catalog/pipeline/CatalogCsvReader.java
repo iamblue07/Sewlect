@@ -21,8 +21,6 @@ import java.util.Map;
 @Component
 public class CatalogCsvReader {
 
-    // .setHeader() with no args reads column names from the file's own first row,
-    // instead of hardcoding them here too — one less place for the two to drift apart.
     private static final CSVFormat CSV_FORMAT = CSVFormat.DEFAULT.builder()
             .setHeader()
             .setSkipHeaderRecord(true)

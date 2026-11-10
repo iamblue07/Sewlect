@@ -25,11 +25,14 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.mockito.Spy;
+import java.time.Clock;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -45,6 +48,9 @@ class PhotoServiceTest {
 
     @Mock
     private StorageService storageService;
+
+    @Spy
+    private Clock clock = Clock.systemDefaultZone();
 
     @InjectMocks
     private PhotoService photoService;
@@ -82,14 +88,15 @@ class PhotoServiceTest {
     }
 
     @Test
-    void confirmUpload_newPhotoType_insertsRow() {
+    void confirmUpload_newPhotoType_insertsRowWithTheKey() {
         UUID userId = UUID.randomUUID();
         String key = StorageKeys.bodyPhotoKey(userId, "front");
         User userRef = User.builder().id(userId).build();
         URI downloadUrl = URI.create("https://r2.example.com/presigned-get");
 
         when(storageService.exists(key)).thenReturn(true);
-        when(userBodyPhotoRepository.findByUserIdAndPhotoType(userId, PhotoType.FRONT)).thenReturn(Optional.empty());
+        when(userBodyPhotoRepository.recordUpload(eq(userId), eq(PhotoType.FRONT), eq(key), any(LocalDateTime.class)))
+                .thenReturn(0);
         when(userRepository.getReferenceById(userId)).thenReturn(userRef);
         when(storageService.generateDownloadUrl(key, StorageService.DEFAULT_TTL)).thenReturn(downloadUrl);
 
@@ -109,22 +116,18 @@ class PhotoServiceTest {
     void confirmUpload_existingPhotoType_updatesRowRatherThanInserting() {
         UUID userId = UUID.randomUUID();
         String key = StorageKeys.bodyPhotoKey(userId, "front");
-        UserBodyPhoto existingPhoto = UserBodyPhoto.builder()
-                .user(User.builder().id(userId).build())
-                .photoType(PhotoType.FRONT)
-                .storageKey(key)
-                .build();
         URI downloadUrl = URI.create("https://r2.example.com/presigned-get");
 
         when(storageService.exists(key)).thenReturn(true);
-        when(userBodyPhotoRepository.findByUserIdAndPhotoType(userId, PhotoType.FRONT))
-                .thenReturn(Optional.of(existingPhoto));
+        when(userBodyPhotoRepository.recordUpload(eq(userId), eq(PhotoType.FRONT), eq(key), any(LocalDateTime.class)))
+                .thenReturn(1);
         when(storageService.generateDownloadUrl(key, StorageService.DEFAULT_TTL)).thenReturn(downloadUrl);
 
-        photoService.confirmUpload(userId, PhotoType.FRONT);
+        UserPhotoResponse response = photoService.confirmUpload(userId, PhotoType.FRONT);
 
-        verify(userBodyPhotoRepository).save(existingPhoto);
+        verify(userBodyPhotoRepository, never()).save(any());
         verify(userRepository, never()).getReferenceById(any());
+        assertThat(response.downloadUrl()).isEqualTo(downloadUrl.toString());
     }
 
     @Test
@@ -177,24 +180,21 @@ class PhotoServiceTest {
     }
 
     @Test
-    void confirmUpload_reUpload_keepsSameDeterministicStorageKey() {
+    void confirmUpload_reUpload_restampsTheRowWithTheSameKeyAndTheCurrentTime() {
         UUID userId = UUID.randomUUID();
         String key = StorageKeys.bodyPhotoKey(userId, "front");
-        UserBodyPhoto existingPhoto = UserBodyPhoto.builder()
-                .user(User.builder().id(userId).build())
-                .photoType(PhotoType.FRONT)
-                .storageKey(key)
-                .build();
 
         when(storageService.exists(key)).thenReturn(true);
-        when(userBodyPhotoRepository.findByUserIdAndPhotoType(userId, PhotoType.FRONT))
-                .thenReturn(Optional.of(existingPhoto));
+        when(userBodyPhotoRepository.recordUpload(eq(userId), eq(PhotoType.FRONT), eq(key), any(LocalDateTime.class)))
+                .thenReturn(1);
         when(storageService.generateDownloadUrl(key, StorageService.DEFAULT_TTL))
                 .thenReturn(URI.create("https://r2.example.com/get"));
 
         photoService.confirmUpload(userId, PhotoType.FRONT);
 
-        assertThat(existingPhoto.getStorageKey()).isEqualTo(key);
+        ArgumentCaptor<LocalDateTime> uploadedAt = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(userBodyPhotoRepository).recordUpload(eq(userId), eq(PhotoType.FRONT), eq(key), uploadedAt.capture());
+        assertThat(uploadedAt.getValue()).isCloseTo(LocalDateTime.now(), within(5, ChronoUnit.SECONDS));
     }
 
     @Test

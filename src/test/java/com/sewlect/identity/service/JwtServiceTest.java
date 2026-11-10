@@ -22,6 +22,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
+import java.time.Clock;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -46,7 +47,7 @@ class JwtServiceTest {
         jwtEncoder = jwtConfig.jwtEncoder();
         jwtDecoder = jwtConfig.jwtDecoder();
 
-        jwtService = new JwtService(jwtEncoder, jwtProperties);
+        jwtService = new JwtService(jwtEncoder, jwtProperties, Clock.systemUTC());
     }
 
     private User buildUser() {

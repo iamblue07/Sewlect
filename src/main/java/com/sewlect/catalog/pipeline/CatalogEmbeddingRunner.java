@@ -1,4 +1,3 @@
-// catalog/pipeline/CatalogEmbeddingRunner.java
 package com.sewlect.catalog.pipeline;
 
 import com.sewlect.catalog.properties.CatalogEmbeddingProperties;

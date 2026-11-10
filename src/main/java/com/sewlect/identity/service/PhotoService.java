@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -29,17 +30,17 @@ public class PhotoService {
     private final UserBodyPhotoRepository userBodyPhotoRepository;
     private final UserRepository userRepository;
     private final StorageService storageService;
+    private final Clock clock;
 
     public PresignedUploadResponse generateUploadUrl(UUID userId, PhotoType photoType) {
         String key = StorageKeys.bodyPhotoKey(userId, photoType.name().toLowerCase());
 
         URI uploadUrl = storageService.generateUploadUrl(key, BODY_PHOTO_CONTENT_TYPE, StorageService.DEFAULT_TTL);
-        LocalDateTime expiresAt = LocalDateTime.now().plus(StorageService.DEFAULT_TTL);
+        LocalDateTime expiresAt = LocalDateTime.now(clock).plus(StorageService.DEFAULT_TTL);
 
         return new PresignedUploadResponse(uploadUrl.toString(), expiresAt);
     }
 
-    @Transactional
     public UserPhotoResponse confirmUpload(UUID userId, PhotoType photoType) {
         String key = StorageKeys.bodyPhotoKey(userId, photoType.name().toLowerCase());
 
@@ -47,18 +48,17 @@ public class PhotoService {
             throw new BadRequestException("No upload found for photo type: " + photoType);
         }
 
-        UserBodyPhoto photo = userBodyPhotoRepository.findByUserIdAndPhotoType(userId, photoType)
-                .orElseGet(() -> newPhoto(userId, photoType));
-        photo.setStorageKey(key);
-        userBodyPhotoRepository.save(photo);
+        if (userBodyPhotoRepository.recordUpload(userId, photoType, key, LocalDateTime.now(clock)) == 0) {
+            userBodyPhotoRepository.save(newPhoto(userId, photoType, key));
+        }
 
-        return toPhotoResponse(photo);
+        return toPhotoResponse(photoType, key);
     }
 
     @Transactional(readOnly = true)
     public List<UserPhotoResponse> listPhotos(UUID userId) {
         return userBodyPhotoRepository.findAllByUserId(userId).stream()
-                .map(this::toPhotoResponse)
+                .map(photo -> toPhotoResponse(photo.getPhotoType(), photo.getStorageKey()))
                 .toList();
     }
 
@@ -74,15 +74,16 @@ public class PhotoService {
                 .map(photo -> photo.getUpdatedAt() != null ? photo.getUpdatedAt() : photo.getCreatedAt());
     }
 
-    private UserBodyPhoto newPhoto(UUID userId, PhotoType photoType) {
+    private UserBodyPhoto newPhoto(UUID userId, PhotoType photoType, String storageKey) {
         return UserBodyPhoto.builder()
                 .user(userRepository.getReferenceById(userId))
                 .photoType(photoType)
+                .storageKey(storageKey)
                 .build();
     }
 
-    private UserPhotoResponse toPhotoResponse(UserBodyPhoto photo) {
-        URI downloadUrl = storageService.generateDownloadUrl(photo.getStorageKey(), StorageService.DEFAULT_TTL);
-        return new UserPhotoResponse(photo.getPhotoType(), downloadUrl.toString());
+    private UserPhotoResponse toPhotoResponse(PhotoType photoType, String storageKey) {
+        URI downloadUrl = storageService.generateDownloadUrl(storageKey, StorageService.DEFAULT_TTL);
+        return new UserPhotoResponse(photoType, downloadUrl.toString());
     }
 }

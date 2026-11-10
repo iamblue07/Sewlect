@@ -36,8 +36,6 @@ public class CatalogImportService {
         Map<String, String> imageLinksByFilename = catalogCsvReader.readImageLinks(imagesCsvPath);
         List<StyleCsvRecord> styleRecords = catalogCsvReader.readStyles(stylesCsvPath);
 
-        // Bulk-fetched once, checked in-memory from here on — a HashSet keeps each
-        // membership check O(1); re-querying the DB per row would be ~44k round trips.
         Set<String> existingExternalIds = new HashSet<>(productRepository.findAllExternalIds());
 
         int created = 0;
@@ -92,12 +90,6 @@ public class CatalogImportService {
                 .build();
     }
 
-    // Deliberately NOT @Transactional. Each saveAll() below is already atomic on its
-    // own — Spring Data wraps every repository method individually — and independent
-    // per-chunk commits are what make a re-run after a crash resumable: one failed
-    // chunk doesn't roll back the chunks already committed. It also wouldn't work as
-    // a same-class @Transactional call anyway: Spring's proxy can't intercept
-    // self-invocation, so the annotation would silently do nothing here.
     private void saveChunk(List<Product> products) {
         List<Product> savedProducts = productRepository.saveAll(products);
 

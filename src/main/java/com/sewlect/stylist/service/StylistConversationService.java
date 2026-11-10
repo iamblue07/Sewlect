@@ -75,7 +75,6 @@ public class StylistConversationService {
         AssistantTurn turn = stylistChatModelService.nextTurn(
                 promptContextFactory.build(userId), history, null, true);
         TurnRecord record = stylistPersistenceService.appendTurn(conversationId, nextSequence(history), null, turn);
-        recordIfDeclined(userId, turn);
         return responseAssembler.toTurnResponse(conversationId, record, userTurns);
     }
 

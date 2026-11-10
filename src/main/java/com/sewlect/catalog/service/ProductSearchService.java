@@ -20,9 +20,8 @@ public class ProductSearchService {
 
     private final ProductRepository productRepository;
 
-    public List<Product> findEligible(GarmentRole role, Set<String> genders, BigDecimal priceCeiling) {
-        return productRepository.findByGarmentRoleAndGenderInAndBasePriceLessThanEqualAndPrimaryColorIsNotNullAndTextEmbeddingIsNotNull(
-                role, genders, priceCeiling);
+    public List<UUID> findEligibleIds(GarmentRole role, Set<String> genders, BigDecimal priceCeiling) {
+        return productRepository.findEligibleIds(role, genders, priceCeiling);
     }
 
     public List<Product> findNearest(GarmentRole role, Set<String> genders, BigDecimal priceCeiling,

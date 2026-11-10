@@ -302,13 +302,14 @@ class AuthServiceTest {
         when(jwtService.generateAccessToken(owner)).thenReturn("new-access-token");
         when(jwtService.generateRefreshToken()).thenReturn("raw-new-token");
         when(jwtService.hashToken("raw-new-token")).thenReturn("new-token-hash");
+        when(refreshTokenRepository.revokeIfActive(eq(storedToken.getId()), any(LocalDateTime.class))).thenReturn(1);
 
         AuthResponse response = authService.refresh(request);
 
         assertThat(response.refreshToken()).isEqualTo("raw-new-token");
         assertThat(response.refreshToken()).isNotEqualTo("raw-old-token");
-        assertThat(storedToken.getRevokedAt()).isNotNull();
-        verify(refreshTokenRepository, times(2)).save(any(RefreshToken.class));
+        verify(refreshTokenRepository).revokeIfActive(eq(storedToken.getId()), any(LocalDateTime.class));
+        verify(refreshTokenRepository, times(1)).save(any(RefreshToken.class));
     }
 
     @Test
@@ -322,6 +323,7 @@ class AuthServiceTest {
         when(jwtService.generateAccessToken(owner)).thenReturn("new-access-token");
         when(jwtService.generateRefreshToken()).thenReturn("raw-new-token");
         when(jwtService.hashToken("raw-new-token")).thenReturn("new-token-hash");
+        when(refreshTokenRepository.revokeIfActive(eq(storedToken.getId()), any(LocalDateTime.class))).thenReturn(1);
 
         authService.refresh(request);
 
@@ -492,7 +494,7 @@ class AuthServiceTest {
 
         verify(securityEventLogger).passwordChangeRejected(user.getId());
         verify(userRepository, never()).save(any(User.class));
-        verify(refreshTokenRepository, never()).revokeAllActiveByUserId(any(), any());
+        verify(refreshTokenRepository, never()).deleteAllByUserId(any());
         verify(jwtService, never()).generateAccessToken(any());
         assertThat(user.getPasswordHash()).isEqualTo("existing-hash");
     }
@@ -515,13 +517,13 @@ class AuthServiceTest {
     }
 
     @Test
-    void changePassword_success_storesTheNewHashRevokesEveryActiveTokenAndIssuesAFreshPair() {
+    void changePassword_success_storesTheNewHashDeletesEveryRefreshTokenAndIssuesAFreshPair() {
         User user = buildUser("user@example.com", Role.USER);
         when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("old-password", "existing-hash")).thenReturn(true);
         when(passwordEncoder.encode("brand-new-password")).thenReturn("new-hash");
-        when(refreshTokenRepository.revokeAllActiveByUserId(eq(user.getId()), any(LocalDateTime.class))).thenReturn(2);
+        when(refreshTokenRepository.deleteAllByUserId(user.getId())).thenReturn(2);
         stubTokenIssuance();
 
         AuthResponse response = authService.changePassword(user.getId(),
@@ -530,19 +532,19 @@ class AuthServiceTest {
         assertThat(user.getPasswordHash()).isEqualTo("new-hash");
         InOrder order = inOrder(userRepository, refreshTokenRepository);
         order.verify(userRepository).save(user);
-        order.verify(refreshTokenRepository).revokeAllActiveByUserId(eq(user.getId()), any(LocalDateTime.class));
+        order.verify(refreshTokenRepository).deleteAllByUserId(user.getId());
         assertThat(response.accessToken()).isEqualTo("access-token");
         assertThat(response.refreshToken()).isEqualTo("raw-refresh-token");
     }
 
     @Test
-    void changePassword_success_auditsAPasswordChangeWithTheRevokedCountNeverATheftDetection() {
+    void changePassword_success_auditsAPasswordChangeWithTheDeletedCountNeverATheftDetection() {
         User user = buildUser("user@example.com", Role.USER);
         when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("old-password", "existing-hash")).thenReturn(true);
         when(passwordEncoder.encode("brand-new-password")).thenReturn("new-hash");
-        when(refreshTokenRepository.revokeAllActiveByUserId(eq(user.getId()), any(LocalDateTime.class))).thenReturn(2);
+        when(refreshTokenRepository.deleteAllByUserId(user.getId())).thenReturn(2);
         stubTokenIssuance();
 
         authService.changePassword(user.getId(), new ChangePasswordRequest("old-password", "brand-new-password"));
@@ -553,13 +555,13 @@ class AuthServiceTest {
     }
 
     @Test
-    void changePassword_noActiveTokens_stillSucceedsAndAuditsZeroRevoked() {
+    void changePassword_noTokens_stillSucceedsAndAuditsZeroDeleted() {
         User user = buildUser("user@example.com", Role.USER);
         when(rateLimiter.tryConsume(any(), any(), anyInt(), any())).thenReturn(true);
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("old-password", "existing-hash")).thenReturn(true);
         when(passwordEncoder.encode("brand-new-password")).thenReturn("new-hash");
-        when(refreshTokenRepository.revokeAllActiveByUserId(eq(user.getId()), any(LocalDateTime.class))).thenReturn(0);
+        when(refreshTokenRepository.deleteAllByUserId(user.getId())).thenReturn(0);
         stubTokenIssuance();
 
         AuthResponse response = authService.changePassword(user.getId(),

@@ -13,10 +13,6 @@ import org.springframework.web.client.RestClient;
 @Configuration
 public class AiHttpClientConfig {
 
-    // Read timeout has to be generous for local inference — the model may need to
-    // reload into VRAM and then actually run, which is a different order of magnitude
-    // than a typical REST call. Connect timeout stays short: Ollama is local, so if
-    // it's not reachable at all we want to fail fast, not wait minutes for nothing.
     @Bean
     public RestClient.Builder restClientBuilder() {
         RequestConfig requestConfig = RequestConfig.custom()

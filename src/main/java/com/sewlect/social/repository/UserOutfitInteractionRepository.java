@@ -5,6 +5,7 @@ import com.sewlect.social.enums.InteractionType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -16,7 +17,13 @@ public interface UserOutfitInteractionRepository extends JpaRepository<UserOutfi
 
     boolean existsByUserIdAndOutfitIdAndInteractionType(UUID userId, UUID outfitId, InteractionType interactionType);
 
-    long deleteByUserIdAndOutfitIdAndInteractionType(UUID userId, UUID outfitId, InteractionType interactionType);
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            DELETE FROM UserOutfitInteraction i
+            WHERE i.user.id = :userId AND i.outfit.id = :outfitId AND i.interactionType = :interactionType
+            """)
+    int deleteByUserIdAndOutfitIdAndInteractionType(@Param("userId") UUID userId, @Param("outfitId") UUID outfitId,
+                                                    @Param("interactionType") InteractionType interactionType);
 
     @Query(value = """
             SELECT i FROM UserOutfitInteraction i

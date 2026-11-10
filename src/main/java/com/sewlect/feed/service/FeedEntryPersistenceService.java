@@ -20,7 +20,6 @@ public class FeedEntryPersistenceService {
 
     private final FeedEntryRepository feedEntryRepository;
 
-    @Transactional
     public boolean saveIfAbsent(User user, Outfit outfit, BigDecimal rankScore) {
         FeedEntry entry = FeedEntry.builder()
                 .user(user)

@@ -17,10 +17,8 @@ import java.net.URI;
 @EnableConfigurationProperties(R2Properties.class)
 public class R2Config {
 
-    // R2 requires the SDK to be given a region, but ignores its value — "auto" is Cloudflare's prescribed placeholder.
     private static final Region R2_REGION = Region.of("auto");
 
-    // R2 does not serve buckets as virtual-hosted subdomains; path-style addressing is required.
     private static final boolean PATH_STYLE_ACCESS = true;
 
     private final R2Properties properties;

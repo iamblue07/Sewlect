@@ -35,8 +35,8 @@ public class SecurityEventLogger {
         log.info("event=token_rotation outcome=success userId={}", userId);
     }
 
-    public void passwordChanged(UUID userId, int revokedTokenCount) {
-        log.info("event=password_change outcome=success userId={} revokedTokens={}", userId, revokedTokenCount);
+    public void passwordChanged(UUID userId, int deletedTokenCount) {
+        log.info("event=password_change outcome=success userId={} deletedTokens={}", userId, deletedTokenCount);
     }
 
     public void passwordChangeRejected(UUID userId) {

@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -69,6 +70,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex, HttpServletRequest request) {
         String message = "HTTP method '" + ex.getMethod() + "' is not supported for this endpoint";
         return buildResponse(HttpStatus.METHOD_NOT_ALLOWED, message, request);
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex, HttpServletRequest request) {
+        String message = "Content type '" + ex.getContentType() + "' is not supported; send application/json";
+        return buildResponse(HttpStatus.UNSUPPORTED_MEDIA_TYPE, message, request);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

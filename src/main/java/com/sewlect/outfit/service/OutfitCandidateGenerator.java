@@ -68,12 +68,12 @@ public class OutfitCandidateGenerator {
         Set<String> genders = genderFilterResolver.allowedGenders(profile.getSex());
         BigDecimal priceCeiling = budgetCeilingResolver.resolve(profile.getAverageBudgetPerOutfit());
 
-        List<Product> topPool = productSearchService.findEligible(GarmentRole.TOP, genders, priceCeiling);
-        List<Product> fullBodyPool = productSearchService.findEligible(GarmentRole.FULL_BODY, genders, priceCeiling);
+        List<UUID> topPool = productSearchService.findEligibleIds(GarmentRole.TOP, genders, priceCeiling);
+        List<UUID> fullBodyPool = productSearchService.findEligibleIds(GarmentRole.FULL_BODY, genders, priceCeiling);
         Set<UUID> preferredProductIds = resolvePreferredProductIds(profile.getUserId());
 
         GenerationContext context = new GenerationContext(
-                genders, priceCeiling, topPool, fullBodyPool, preferredProductIds, new HashMap<>());
+                genders, priceCeiling, topPool, fullBodyPool, preferredProductIds, new HashMap<>(), new HashMap<>());
 
         List<OutfitPersistenceService.PersistenceCandidate> candidates = new ArrayList<>();
         int attempts = 0;
@@ -99,16 +99,20 @@ public class OutfitCandidateGenerator {
     }
 
     private Optional<OutfitPersistenceService.PersistenceCandidate> runCycle(GenerationContext context) {
-        List<Product> availableTop = filterAvailable(context.topPool(), context.productUsageCounts());
-        List<Product> availableFullBody = filterAvailable(context.fullBodyPool(), context.productUsageCounts());
+        List<UUID> availableTop = filterAvailableIds(context.topPool(), context.productUsageCounts());
+        List<UUID> availableFullBody = filterAvailableIds(context.fullBodyPool(), context.productUsageCounts());
 
         CoreShape coreShape = rollCoreShape(availableTop, availableFullBody);
         if (coreShape == null) {
             return Optional.empty();
         }
 
-        List<Product> anchorPool = coreShape == CoreShape.TOP_BOTTOM ? availableTop : availableFullBody;
-        Product anchor = sampleAnchor(anchorPool, context.preferredProductIds());
+        List<UUID> anchorPool = coreShape == CoreShape.TOP_BOTTOM ? availableTop : availableFullBody;
+        Optional<Product> loadedAnchor = loadAnchor(sampleAnchor(anchorPool, context.preferredProductIds()), context);
+        if (loadedAnchor.isEmpty()) {
+            return Optional.empty();
+        }
+        Product anchor = loadedAnchor.get();
         String anchorOccasion = anchor.getOccasion();
 
         List<BeamPath> beams = List.of(new BeamPath(List.of(anchor), BigDecimal.ZERO, new LinkedHashMap<>()));
@@ -257,16 +261,20 @@ public class OutfitCandidateGenerator {
         return -1;
     }
 
-    private Product sampleAnchor(List<Product> pool, Set<UUID> preferredProductIds) {
-        List<Product> preferredSubset = pool.stream()
-                .filter(p -> preferredProductIds.contains(p.getId()))
+    private UUID sampleAnchor(List<UUID> pool, Set<UUID> preferredProductIds) {
+        List<UUID> preferredSubset = pool.stream()
+                .filter(preferredProductIds::contains)
                 .toList();
         boolean drawFromPreferred = !preferredSubset.isEmpty() && random.nextDouble() < PREFERRED_ANCHOR_PROBABILITY;
-        List<Product> drawPool = drawFromPreferred ? preferredSubset : pool;
+        List<UUID> drawPool = drawFromPreferred ? preferredSubset : pool;
         return drawPool.get(random.nextInt(drawPool.size()));
     }
 
-    private CoreShape rollCoreShape(List<Product> availableTop, List<Product> availableFullBody) {
+    private Optional<Product> loadAnchor(UUID anchorId, GenerationContext context) {
+        return context.loadedAnchors().computeIfAbsent(anchorId, productSearchService::findById);
+    }
+
+    private CoreShape rollCoreShape(List<UUID> availableTop, List<UUID> availableFullBody) {
         if (availableTop.isEmpty() && availableFullBody.isEmpty()) {
             return null;
         }
@@ -285,8 +293,15 @@ public class OutfitCandidateGenerator {
     }
 
     private List<Product> filterAvailable(List<Product> pool, Map<UUID, Integer> usageCounts) {
-        int cap = diversityProperties.maxProductRepetitions();
-        return pool.stream().filter(p -> usageCounts.getOrDefault(p.getId(), 0) < cap).toList();
+        return pool.stream().filter(p -> isAvailable(p.getId(), usageCounts)).toList();
+    }
+
+    private List<UUID> filterAvailableIds(List<UUID> pool, Map<UUID, Integer> usageCounts) {
+        return pool.stream().filter(id -> isAvailable(id, usageCounts)).toList();
+    }
+
+    private boolean isAvailable(UUID productId, Map<UUID, Integer> usageCounts) {
+        return usageCounts.getOrDefault(productId, 0) < diversityProperties.maxProductRepetitions();
     }
 
     private void recordUsage(List<Product> products, Map<UUID, Integer> usageCounts) {
@@ -305,10 +320,11 @@ public class OutfitCandidateGenerator {
     private record GenerationContext(
             Set<String> genders,
             BigDecimal priceCeiling,
-            List<Product> topPool,
-            List<Product> fullBodyPool,
+            List<UUID> topPool,
+            List<UUID> fullBodyPool,
             Set<UUID> preferredProductIds,
-            Map<UUID, Integer> productUsageCounts
+            Map<UUID, Integer> productUsageCounts,
+            Map<UUID, Optional<Product>> loadedAnchors
     ) {
     }
 }

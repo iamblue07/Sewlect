@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -29,10 +30,11 @@ public class JwtService {
 
     private final JwtEncoder jwtEncoder;
     private final JwtProperties jwtProperties;
+    private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public String generateAccessToken(User user) {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .subject(user.getId().toString())

@@ -34,6 +34,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -133,7 +135,6 @@ class OutfitCandidateGeneratorTest {
         stubSlotCandidates(GarmentRole.BOTTOM, List.of(productWithRole(GarmentRole.BOTTOM)));
         stubSlotCandidates(GarmentRole.FOOTWEAR, List.of(productWithRole(GarmentRole.FOOTWEAR)));
 
-        // batchSize of 10 can never be reached - only 2 distinct anchors exist, capped at 3 uses each
         OutfitCandidateGenerator generator = generatorWithProperties(10, 100, 1);
 
         assertThat(generator.generate(profile)).hasSizeLessThanOrEqualTo(6);
@@ -186,7 +187,7 @@ class OutfitCandidateGeneratorTest {
         generator.generate(profile);
 
         ArgumentCaptor<BigDecimal> priceCaptor = ArgumentCaptor.forClass(BigDecimal.class);
-        verify(productSearchService).findEligible(eq(GarmentRole.TOP), any(), priceCaptor.capture());
+        verify(productSearchService).findEligibleIds(eq(GarmentRole.TOP), any(), priceCaptor.capture());
         assertThat(priceCaptor.getValue()).isGreaterThan(new BigDecimal("100000"));
     }
 
@@ -201,7 +202,7 @@ class OutfitCandidateGeneratorTest {
         generator.generate(profile);
 
         ArgumentCaptor<Set<String>> gendersCaptor = ArgumentCaptor.forClass(Set.class);
-        verify(productSearchService).findEligible(eq(GarmentRole.TOP), gendersCaptor.capture(), any());
+        verify(productSearchService).findEligibleIds(eq(GarmentRole.TOP), gendersCaptor.capture(), any());
         assertThat(gendersCaptor.getValue()).containsExactlyInAnyOrder("Men", "Unisex");
     }
 
@@ -217,10 +218,12 @@ class OutfitCandidateGeneratorTest {
     }
 
     private void stubAnchorPools(List<Product> topPool, List<Product> fullBodyPool) {
-        lenient().when(productSearchService.findEligible(eq(GarmentRole.TOP), any(), any()))
-                .thenReturn(topPool);
-        lenient().when(productSearchService.findEligible(eq(GarmentRole.FULL_BODY), any(), any()))
-                .thenReturn(fullBodyPool);
+        lenient().when(productSearchService.findEligibleIds(eq(GarmentRole.TOP), any(), any()))
+                .thenReturn(topPool.stream().map(Product::getId).toList());
+        lenient().when(productSearchService.findEligibleIds(eq(GarmentRole.FULL_BODY), any(), any()))
+                .thenReturn(fullBodyPool.stream().map(Product::getId).toList());
+        Stream.concat(topPool.stream(), fullBodyPool.stream()).forEach(anchor ->
+                lenient().when(productSearchService.findById(anchor.getId())).thenReturn(Optional.of(anchor)));
     }
 
     private void stubSlotCandidates(GarmentRole role, List<Product> candidates) {

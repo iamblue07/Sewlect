@@ -120,7 +120,7 @@ class StylistExecutionServiceTest {
     }
 
     @Test
-    void confirm_generationBudgetRefused_leavesTheConversationOpen() {
+    void confirm_generationBudgetRefused_reopensTheConversationWithoutSubmitting() {
         StylistConversation conversation = owned(ConversationStatus.OPEN);
         StylistMessage latest = message(conversation, 3, MessageRole.ASSISTANT, "Ideas", proposalJson());
         when(messageRepository.findFirstByConversationIdOrderBySequenceDesc(conversationId)).thenReturn(Optional.of(latest));
@@ -128,12 +128,14 @@ class StylistExecutionServiceTest {
 
         assertThatThrownBy(() -> service.confirm(userId, conversationId, latest.getId()))
                 .isInstanceOf(RateLimitExceededException.class);
-        verify(persistenceService, never()).startExecution(any(), any(), any());
+        InOrder order = inOrder(persistenceService);
+        order.verify(persistenceService).startExecution(eq(conversationId), eq(latest.getId()), any(SearchProposal.class));
+        order.verify(persistenceService).revertToOpen(conversationId);
         verifyNoInteractions(stylistExecutor);
     }
 
     @Test
-    void confirm_consumesOneUnitPerSearchBeforeStartingAndSubmitsTheExecution() {
+    void confirm_startsTheExecutionThenConsumesOneUnitAndSubmits() {
         StylistConversation conversation = owned(ConversationStatus.OPEN);
         StylistMessage latest = message(conversation, 3, MessageRole.ASSISTANT, "Ideas", proposalJson());
         when(messageRepository.findFirstByConversationIdOrderBySequenceDesc(conversationId)).thenReturn(Optional.of(latest));
@@ -143,8 +145,8 @@ class StylistExecutionServiceTest {
         ConversationSummaryResponse summary = service.confirm(userId, conversationId, latest.getId());
 
         InOrder order = inOrder(quotaService, persistenceService, stylistExecutor);
-        order.verify(quotaService).consumeGeneration(userId, 1);
         order.verify(persistenceService).startExecution(eq(conversationId), eq(latest.getId()), any(SearchProposal.class));
+        order.verify(quotaService).consumeGeneration(userId, 1);
         order.verify(stylistExecutor).submit(any(Runnable.class));
         assertThat(summary.status()).isEqualTo(ConversationStatus.EXECUTING);
     }

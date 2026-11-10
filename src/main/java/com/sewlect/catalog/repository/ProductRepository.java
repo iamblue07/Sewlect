@@ -49,9 +49,16 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     @Query("UPDATE Product p SET p.garmentRole = :role WHERE p.id IN :ids")
     int updateGarmentRoleByIdIn(@Param("role") GarmentRole role, @Param("ids") Collection<UUID> ids);
 
-    List<Product> findByGarmentRoleAndGenderInAndBasePriceLessThanEqualAndPrimaryColorIsNotNullAndTextEmbeddingIsNotNull(
-            GarmentRole garmentRole, Collection<String> genders, BigDecimal priceCeiling
-    );
+    @Query("""
+            SELECT p.id FROM Product p
+            WHERE p.garmentRole = :role
+              AND p.gender IN :genders
+              AND p.basePrice <= :priceCeiling
+              AND p.primaryColor IS NOT NULL
+              AND p.textEmbedding IS NOT NULL
+            """)
+    List<UUID> findEligibleIds(@Param("role") GarmentRole role, @Param("genders") Collection<String> genders,
+                               @Param("priceCeiling") BigDecimal priceCeiling);
 
     @Query(value = """
             SELECT p.* FROM products p

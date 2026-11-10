@@ -1,6 +1,7 @@
 package com.sewlect.stylist.service;
 
 import com.sewlect.common.exception.ConflictException;
+import com.sewlect.common.exception.RateLimitExceededException;
 import com.sewlect.common.exception.ServiceUnavailableException;
 import com.sewlect.outfit.service.PromptGenerationQuotaService;
 import com.sewlect.stylist.domain.SearchProposal;
@@ -47,11 +48,20 @@ public class StylistExecutionService {
         }
 
         SearchProposal proposal = searchProposalCodec.decode(latest.getProposal());
-        promptGenerationQuotaService.consumeGeneration(userId, SEARCHES_PER_CONFIRMATION);
         stylistPersistenceService.startExecution(conversationId, messageId, proposal);
+        consumeGenerationOrReopen(userId, conversationId);
         submit(conversationId);
 
         return responseAssembler.toSummary(conversationQueryService.getOwned(userId, conversationId));
+    }
+
+    private void consumeGenerationOrReopen(UUID userId, UUID conversationId) {
+        try {
+            promptGenerationQuotaService.consumeGeneration(userId, SEARCHES_PER_CONFIRMATION);
+        } catch (RateLimitExceededException e) {
+            stylistPersistenceService.revertToOpen(conversationId);
+            throw e;
+        }
     }
 
     private void submit(UUID conversationId) {
